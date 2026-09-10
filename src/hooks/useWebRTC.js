@@ -148,21 +148,23 @@ export default function useWebRTC(socket, roomUsers, isCallActive, setIsCallActi
 
       const activeIds = new Set(roomUsersRef.current.map(u => u.id));
 
-      // Initiate offers for peers
+      // Initiate offers for peers deterministically (socket.id > user.id creates offer to avoid glare/collision)
       for (const user of roomUsersRef.current) {
         if (user.id !== socket.id && !peersRef.current[user.id]) {
-          const peer = createPeer(user.id, localStreamRef.current);
-          peersRef.current[user.id] = peer;
-          
-          try {
-            const offer = await peer.createOffer();
-            await peer.setLocalDescription(offer);
-            socket.emit('webrtc-offer', {
-              targetSocketId: user.id,
-              sdp: peer.localDescription
-            });
-          } catch (e) {
-            console.error("Error creating offer", e);
+          if (socket.id > user.id) {
+            const peer = createPeer(user.id, localStreamRef.current);
+            peersRef.current[user.id] = peer;
+            
+            try {
+              const offer = await peer.createOffer();
+              await peer.setLocalDescription(offer);
+              socket.emit('webrtc-offer', {
+                targetSocketId: user.id,
+                sdp: peer.localDescription
+              });
+            } catch (e) {
+              console.error("Error creating offer", e);
+            }
           }
         }
       }
@@ -211,6 +213,22 @@ export default function useWebRTC(socket, roomUsers, isCallActive, setIsCallActi
       }
 
       let peer = peersRef.current[callerSocketId];
+
+      // Handle offer collision (glare) in mesh connection
+      const isOfferCollision = peer && (peer.signalingState !== 'stable');
+      const isPolite = socket.id < callerSocketId;
+
+      if (isOfferCollision) {
+        if (!isPolite) {
+          // Impolite peer ignores offer collision
+          return;
+        }
+        // Polite peer rolls back local offer to accept remote offer
+        try {
+          await peer.setLocalDescription({ type: 'rollback' });
+        } catch (e) {}
+      }
+
       if (!peer) {
         peer = createPeer(callerSocketId, currentStream);
         peersRef.current[callerSocketId] = peer;
