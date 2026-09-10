@@ -1,9 +1,150 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import VideoPlayer from './VideoPlayer';
 import { 
   Mic, MicOff, Video, VideoOff, PhoneOff, Monitor, Maximize, Minimize, 
-  MessageSquare, PhoneCall, Pin, PinOff, Grid, User, LayoutGrid, Square 
+  MessageSquare, PhoneCall, Pin, PinOff, Grid, User, LayoutGrid, Square, Tv 
 } from 'lucide-react';
+
+// Custom Hook to monitor audio volume for active speaker detection
+function useAudioVolume(stream) {
+  const [isSpeaking, setIsSpeaking] = useState(false);
+
+  useEffect(() => {
+    if (!stream) {
+      setIsSpeaking(false);
+      return;
+    }
+
+    const audioTracks = stream.getAudioTracks();
+    if (audioTracks.length === 0 || !audioTracks[0].enabled) {
+      setIsSpeaking(false);
+      return;
+    }
+
+    let audioCtx;
+    let analyser;
+    let source;
+    let animFrameId;
+
+    try {
+      const AudioCtxClass = window.AudioContext || window.webkitAudioContext;
+      if (!AudioCtxClass) return;
+
+      audioCtx = new AudioCtxClass();
+      analyser = audioCtx.createAnalyser();
+      analyser.fftSize = 128;
+      analyser.smoothingTimeConstant = 0.4;
+
+      source = audioCtx.createMediaStreamSource(stream);
+      source.connect(analyser);
+
+      const bufferLength = analyser.frequencyBinCount;
+      const dataArray = new Uint8Array(bufferLength);
+
+      let silenceCounter = 0;
+
+      const detectVolume = () => {
+        analyser.getByteFrequencyData(dataArray);
+        let sum = 0;
+        for (let i = 0; i < bufferLength; i++) {
+          sum += dataArray[i];
+        }
+        const avg = sum / bufferLength;
+
+        if (avg > 10) {
+          silenceCounter = 0;
+          setIsSpeaking(true);
+        } else {
+          silenceCounter++;
+          if (silenceCounter > 12) { // ~200ms debounce to avoid flickering
+            setIsSpeaking(false);
+          }
+        }
+
+        animFrameId = requestAnimationFrame(detectVolume);
+      };
+
+      detectVolume();
+    } catch (err) {
+      console.warn("AudioContext active speaker analysis blocked/failed:", err);
+    }
+
+    return () => {
+      if (animFrameId) cancelAnimationFrame(animFrameId);
+      if (source) {
+        try { source.disconnect(); } catch (e) {}
+      }
+      if (audioCtx && audioCtx.state !== 'closed') {
+        try { audioCtx.close(); } catch (e) {}
+      }
+    };
+  }, [stream]);
+
+  return isSpeaking;
+}
+
+// Single Participant Video Card Tile with Active Speaker Equalizer
+function ParticipantTile({ 
+  id, 
+  stream, 
+  isLocal, 
+  label, 
+  isScreenSharing, 
+  mediaState, 
+  isFeatured, 
+  isPinned, 
+  onTogglePin,
+  onSpeakingChange 
+}) {
+  const isSpeaking = useAudioVolume(stream);
+
+  useEffect(() => {
+    if (onSpeakingChange) {
+      onSpeakingChange(id, isSpeaking);
+    }
+  }, [id, isSpeaking, onSpeakingChange]);
+
+  return (
+    <div 
+      className={`video-container ${isLocal ? 'local-container' : ''} ${isFeatured ? 'is-featured' : ''} ${isPinned ? 'is-pinned' : ''} ${isSpeaking ? 'active-speaker' : ''}`}
+      onDoubleClick={(e) => onTogglePin(id, e)}
+      title="Double-click to pin / unpin video"
+    >
+      <VideoPlayer stream={stream} isLocal={isLocal} muted={isLocal} />
+      
+      {/* Video Tile Label & Equalizer */}
+      <div className="video-label">
+        {isSpeaking && (
+          <div className="soundwave-equalizer" title="Speaking">
+            <span className="eq-bar bar-1"></span>
+            <span className="eq-bar bar-2"></span>
+            <span className="eq-bar bar-3"></span>
+          </div>
+        )}
+        <span>{label}</span>
+      </div>
+
+      {/* Media Status Icons */}
+      <div className="video-status">
+        {isLocal && mediaState && !mediaState.audio && (
+          <MicOff size={14} className="status-icon error" />
+        )}
+        {isLocal && mediaState && !mediaState.video && !isScreenSharing && (
+          <VideoOff size={14} className="status-icon error" />
+        )}
+      </div>
+
+      {/* Hover Pin Button */}
+      <button 
+        className={`tile-pin-btn ${isPinned ? 'pinned' : ''}`}
+        onClick={(e) => onTogglePin(id, e)}
+        title={isPinned ? "Unpin video" : "Pin video"}
+      >
+        {isPinned ? <PinOff size={14} /> : <Pin size={14} />}
+      </button>
+    </div>
+  );
+}
 
 export default function CallInterface({ 
   callState,
@@ -22,10 +163,20 @@ export default function CallInterface({
   const [pinnedPeerId, setPinnedPeerId] = useState(null); // null, 'local', or remote socketId
   const [layoutMode, setLayoutMode] = useState('grid'); // 'grid' or 'speaker'
   const [isFullscreen, setIsFullscreen] = useState(false);
+  const [isPipActive, setIsPipActive] = useState(false);
+  const [activeSpeakers, setActiveSpeakers] = useState({}); // { [id]: boolean }
   const callContainerRef = useRef(null);
 
   const remoteSocketIds = Object.keys(remoteStreams);
   const totalParticipants = remoteSocketIds.length + 1;
+
+  // Active Speaker Handler Callback
+  const handleSpeakingChange = useCallback((id, speaking) => {
+    setActiveSpeakers(prev => {
+      if (prev[id] === speaking) return prev;
+      return { ...prev, [id]: speaking };
+    });
+  }, []);
 
   // Auto-feature screen sharing if screen share is turned on and nothing explicitly pinned
   useEffect(() => {
@@ -57,7 +208,6 @@ export default function CallInterface({
     if (layoutMode === 'grid') {
       setLayoutMode('speaker');
       if (!pinnedPeerId) {
-        // Default to first remote peer or local peer
         setPinnedPeerId(remoteSocketIds[0] || 'local');
       }
     } else {
@@ -90,6 +240,29 @@ export default function CallInterface({
     return () => document.removeEventListener('fullscreenchange', handleFullscreenChange);
   }, []);
 
+  // Handle Native Picture-in-Picture (PiP) API
+  const togglePictureInPicture = async () => {
+    try {
+      if (document.pictureInPictureElement) {
+        await document.exitPictureInPicture();
+        setIsPipActive(false);
+      } else if (callContainerRef.current) {
+        // Find main active video element
+        const videoEls = callContainerRef.current.querySelectorAll('video');
+        if (videoEls.length > 0) {
+          const targetVideo = videoEls[0];
+          await targetVideo.requestPictureInPicture();
+          setIsPipActive(true);
+          targetVideo.addEventListener('leavepictureinpicture', () => {
+            setIsPipActive(false);
+          }, { once: true });
+        }
+      }
+    } catch (err) {
+      console.warn("Picture-in-Picture error:", err);
+    }
+  };
+
   // Outgoing Calling State UI
   if (callState === 'outgoing') {
     return (
@@ -111,6 +284,7 @@ export default function CallInterface({
   // Determine active featured ID (either explicitly pinned or effective in speaker mode)
   const activeFeaturedId = pinnedPeerId || (layoutMode === 'speaker' ? (remoteSocketIds[0] || 'local') : null);
   const isSpeakerViewActive = layoutMode === 'speaker' || Boolean(pinnedPeerId);
+  const isFeaturedSpeaking = activeFeaturedId ? Boolean(activeSpeakers[activeFeaturedId]) : false;
 
   return (
     <div ref={callContainerRef} className={`call-interface ${isFullscreen ? 'fullscreen-mode' : ''}`}>
@@ -152,7 +326,7 @@ export default function CallInterface({
       {/* SPEAKER / FEATURED MAIN STAGE */}
       {isSpeakerViewActive && activeFeaturedId && (
         <div className="featured-video-stage">
-          <div className="featured-video-wrapper">
+          <div className={`featured-video-wrapper ${isFeaturedSpeaking ? 'featured-active-speaker' : ''}`}>
             {activeFeaturedId === 'local' ? (
               <VideoPlayer stream={localStream} isLocal={true} muted={true} />
             ) : (
@@ -168,6 +342,9 @@ export default function CallInterface({
                     ? `You ${isScreenSharing ? '(Screen)' : ''}` 
                     : `Peer ${activeFeaturedId.substring(0, 4)}`}
                 </span>
+                {isFeaturedSpeaking && (
+                  <span className="speaking-tag">Speaking</span>
+                )}
                 {pinnedPeerId === activeFeaturedId && (
                   <span className="pinned-tag">Pinned</span>
                 )}
@@ -193,55 +370,34 @@ export default function CallInterface({
         className={isSpeakerViewActive ? 'thumbnail-carousel-strip' : `video-grid grid-count-${totalParticipants}`}
       >
         {/* Local Video Tile */}
-        <div 
-          className={`video-container local-container ${activeFeaturedId === 'local' ? 'is-featured' : ''} ${pinnedPeerId === 'local' ? 'is-pinned' : ''}`}
-          onDoubleClick={(e) => handleTogglePin('local', e)}
-          title="Double-click to pin / unpin video"
-        >
-          <VideoPlayer stream={localStream} isLocal={true} muted={true} />
-          
-          <div className="video-label">
-            <span>You {isScreenSharing ? '(Screen)' : ''}</span>
-          </div>
-
-          <div className="video-status">
-            {!mediaState.audio && <MicOff size={14} className="status-icon error" />}
-            {!mediaState.video && !isScreenSharing && <VideoOff size={14} className="status-icon error" />}
-          </div>
-
-          {/* Hover Pin Button */}
-          <button 
-            className={`tile-pin-btn ${pinnedPeerId === 'local' ? 'pinned' : ''}`}
-            onClick={(e) => handleTogglePin('local', e)}
-            title={pinnedPeerId === 'local' ? "Unpin video" : "Pin video"}
-          >
-            {pinnedPeerId === 'local' ? <PinOff size={14} /> : <Pin size={14} />}
-          </button>
-        </div>
+        <ParticipantTile 
+          id="local"
+          stream={localStream}
+          isLocal={true}
+          label={`You ${isScreenSharing ? '(Screen)' : ''}`}
+          isScreenSharing={isScreenSharing}
+          mediaState={mediaState}
+          isFeatured={activeFeaturedId === 'local'}
+          isPinned={pinnedPeerId === 'local'}
+          onTogglePin={handleTogglePin}
+          onSpeakingChange={handleSpeakingChange}
+        />
 
         {/* Remote Video Tiles */}
         {remoteSocketIds.map((id) => (
-          <div 
-            key={id} 
-            className={`video-container ${activeFeaturedId === id ? 'is-featured' : ''} ${pinnedPeerId === id ? 'is-pinned' : ''}`}
-            onDoubleClick={(e) => handleTogglePin(id, e)}
-            title="Double-click to pin / unpin video"
-          >
-            <VideoPlayer stream={remoteStreams[id]} isLocal={false} muted={false} />
-            
-            <div className="video-label">
-              <span>Peer {id.substring(0, 4)}</span>
-            </div>
-
-            {/* Hover Pin Button */}
-            <button 
-              className={`tile-pin-btn ${pinnedPeerId === id ? 'pinned' : ''}`}
-              onClick={(e) => handleTogglePin(id, e)}
-              title={pinnedPeerId === id ? "Unpin video" : "Pin video"}
-            >
-              {pinnedPeerId === id ? <PinOff size={14} /> : <Pin size={14} />}
-            </button>
-          </div>
+          <ParticipantTile 
+            key={id}
+            id={id}
+            stream={remoteStreams[id]}
+            isLocal={false}
+            label={`Peer ${id.substring(0, 4)}`}
+            isScreenSharing={false}
+            mediaState={null}
+            isFeatured={activeFeaturedId === id}
+            isPinned={pinnedPeerId === id}
+            onTogglePin={handleTogglePin}
+            onSpeakingChange={handleSpeakingChange}
+          />
         ))}
       </div>
 
@@ -271,6 +427,17 @@ export default function CallInterface({
           <Monitor size={20} />
         </button>
 
+        {/* Picture-in-Picture (PiP) Button */}
+        {document.pictureInPictureEnabled && (
+          <button 
+            className={`control-btn ${isPipActive ? 'active-share' : ''}`} 
+            onClick={togglePictureInPicture}
+            title={isPipActive ? "Exit Picture-in-Picture" : "Picture-in-Picture Mode"}
+          >
+            <Tv size={20} />
+          </button>
+        )}
+
         <button 
           className="control-btn" 
           onClick={toggleFullscreen}
@@ -298,4 +465,5 @@ export default function CallInterface({
     </div>
   );
 }
+
 
