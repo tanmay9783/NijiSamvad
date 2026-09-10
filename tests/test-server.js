@@ -242,6 +242,9 @@ async function runServerTests() {
       }
     });
     if (!getRes.ok) throw new Error('Could not fetch uploaded attachment');
+    if (!getRes.headers.get('cache-control')?.includes('no-store')) {
+      throw new Error('Missing Cache-Control: no-store on attachment');
+    }
     
     // 3. Unauthenticated fetch fails
     const noAuthRes = await fetch(`http://localhost:${PORT}/api/attachments/${id}`);
@@ -392,8 +395,15 @@ async function runServerTests() {
 
   // HTTP SECURITY
   await runTest('HTTP - Security headers', async () => {
-    const res = await fetch(`http://localhost:${PORT}/health`);
-    if (!res.headers.get('x-dns-prefetch-control')) throw new Error('Helmet not fully active');
+    const res = await fetch(`http://localhost:${PORT}/api/stats`);
+    const csp = res.headers.get('content-security-policy');
+    const corsHeader = res.headers.get('access-control-allow-origin');
+    
+    if (res.status !== 200) throw new Error('API failed');
+    if (!csp || !csp.includes("default-src 'none'")) throw new Error('Missing strict CSP');
+    if (!corsHeader) throw new Error('Missing CORS Header');
+    
+    console.log('✅ HTTP - Security headers & CSP configured');
   });
 
   // RACE CONDITIONS

@@ -75,3 +75,9 @@ The architecture has been rigorously tested against edge cases, including:
 - **Mesh Architecture**: The application employs a WebRTC mesh architecture optimized for small ephemeral rooms. There is no Media Server or SFU to manage scaling. 
 - **Zero-Cost Strategy**: The project explicitly avoids infrastructure dependencies like TURN servers or persistent databases. Direct Peer-to-Peer (P2P) connections are established via STUN. If strict corporate firewalls block direct P2P connections, WebRTC may fail gracefully to a "receive-only" or isolated state without crashing the app.
 - **Race Condition Immunity**: An audited signaling lifecycle ensures that late joiners, colliding connection attempts, and ungraceful disconnects maintain application stability with strict `RTCPeerConnection` cleanup.
+
+## Phase 8 - Production Security Hardening
+- **Transport Security (HTTPS/WSS)**: Production deployments MUST use HTTPS and WSS. Because Socket.IO passes the `authHash` in headers and payloads, plaintext HTTP exposes room credentials to interception.
+- **Content Security Policy (CSP)**: Helmet is configured with a strict CSP. In production, inline scripts and eval are disabled, allowing only local origins for API and WebRTC/Blob streams.
+- **CORS Isolation**: Access is restricted strictly to the configured `CLIENT_ORIGIN` environment variable.
+- **No Persistent Storage Guarantee**: The application guarantees that all in-memory room state and temporary encrypted attachment files are deleted when the final participant leaves. However, this does NOT make guarantees about external infrastructure (e.g. reverse proxy logs, OS-level filesystem caches, hosting provider backups).

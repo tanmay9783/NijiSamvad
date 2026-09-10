@@ -71,12 +71,27 @@ const attachmentStore = {
   }
 };
 
+const isProduction = process.env.NODE_ENV === 'production';
+
 app.use(helmet({
-  contentSecurityPolicy: false 
+  contentSecurityPolicy: {
+    directives: {
+      defaultSrc: ["'none'"],
+      scriptSrc: isProduction ? ["'self'"] : ["'self'", "'unsafe-inline'", "'unsafe-eval'"],
+      styleSrc: ["'self'", "'unsafe-inline'"],
+      imgSrc: ["'self'", "data:", "blob:"],
+      connectSrc: ["'self'", "ws:", "wss:", "stun:"],
+      mediaSrc: ["'self'", "blob:"],
+      workerSrc: ["'self'", "blob:"],
+      fontSrc: ["'self'", "data:"]
+    },
+  },
+  crossOriginEmbedderPolicy: false,
+  hsts: isProduction ? { maxAge: 31536000, includeSubDomains: true, preload: true } : false
 }));
 
 const allowedOrigin = process.env.CLIENT_ORIGIN || "http://localhost:5173";
-app.use(cors({ origin: allowedOrigin }));
+app.use(cors({ origin: allowedOrigin, credentials: true }));
 app.use(express.json({ limit: '1mb' }));
 app.use('/api/attachments', express.raw({ type: 'application/octet-stream', limit: '10mb' }));
 
@@ -228,6 +243,9 @@ app.post('/api/attachments', async (req, res) => {
       return res.status(400).json({ error: 'Invalid or empty body' });
     }
     const id = await attachmentStore.upload(req.body, roomName);
+    res.set('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+    res.set('Pragma', 'no-cache');
+    res.set('Expires', '0');
     res.status(201).json({ id });
   } catch (error) {
     res.status(500).json({ error: 'Upload failed' });
@@ -255,6 +273,10 @@ app.get('/api/attachments/:id', async (req, res) => {
 
     const data = await attachmentStore.get(id);
     res.set('Content-Type', 'application/octet-stream');
+    res.set('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+    res.set('Pragma', 'no-cache');
+    res.set('Expires', '0');
+    res.set('X-Content-Type-Options', 'nosniff');
     res.send(data);
   } catch (error) {
     res.status(404).json({ error: 'Not found' });
