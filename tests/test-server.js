@@ -316,6 +316,111 @@ async function runServerTests() {
     s1.disconnect();
   });
 
+    await runTest('Room Auth - wrong authHash rejected', () => {
+    return new Promise((resolve, reject) => {
+      const s1 = createClient();
+      s1.on('connect', () => {
+        s1.emit('new-user-joined', { userName: 'Admin', roomName: 'room-auth-test-wrong', authHash: 'correct' });
+      });
+      s1.on('join-success', () => {
+        const socket = createClient();
+        socket.on('connect', () => {
+          socket.emit('new-user-joined', { userName: 'Alice', roomName: 'room-auth-test-wrong', authHash: 'wronghash' });
+        });
+        socket.on('join-error', () => { s1.disconnect(); socket.disconnect(); resolve(); });
+        socket.on('join-success', () => { s1.disconnect(); socket.disconnect(); reject(new Error('Joined with wrong hash')); });
+      });
+    });
+  });
+
+  await runTest('Room Auth - missing authHash rejected', () => {
+    return new Promise((resolve, reject) => {
+      const s1 = createClient();
+      s1.on('connect', () => s1.emit('new-user-joined', { userName: 'Admin', roomName: 'room-auth-test-miss', authHash: 'correct' }));
+      s1.on('join-success', () => {
+        const socket = createClient();
+        socket.on('connect', () => socket.emit('new-user-joined', { userName: 'Alice', roomName: 'room-auth-test-miss' }));
+        socket.on('join-error', () => { s1.disconnect(); socket.disconnect(); resolve(); });
+        socket.on('join-success', () => { s1.disconnect(); socket.disconnect(); reject(new Error('Joined with missing hash')); });
+      });
+    });
+  });
+
+  await runTest('Room Auth - malformed payloads', async () => {
+    const payloads = [
+      { userName: 'Alice', roomName: 'r', authHash: { bad: true } },
+      { userName: 'Alice', roomName: { bad: true }, authHash: 'h' },
+      { userName: { bad: true }, roomName: 'r', authHash: 'h' },
+      { userName: 'A'.repeat(100), roomName: 'r', authHash: 'h' },
+      { userName: 'A', roomName: 'R'.repeat(150), authHash: 'h' }
+    ];
+    for (const p of payloads) {
+      await new Promise((resolve, reject) => {
+        const socket = createClient();
+        socket.on('connect', () => socket.emit('new-user-joined', p));
+        socket.on('join-error', () => { socket.disconnect(); resolve(); });
+        socket.on('join-success', () => { socket.disconnect(); reject(new Error('Joined with malformed payload: ' + JSON.stringify(p))); });
+        setTimeout(() => { socket.disconnect(); resolve(); }, 200); 
+      });
+    }
+  });
+
+  // MESSAGE PAYLOADS
+  await runTest('Message - missing/malformed content rejected safely', async () => {
+    const s1 = createClient();
+    await new Promise(r => s1.on('connect', r));
+    await joinRoom(s1, 'Alice', 'msg-malformed');
+    
+    s1.emit('send', null);
+    s1.emit('send', { content: null });
+    s1.emit('send', { content: { bad: true } });
+    
+    await new Promise(r => setTimeout(r, 200));
+    s1.disconnect();
+  });
+  
+  await runTest('Message - reaction malformed rejected safely', async () => {
+    const s1 = createClient();
+    await new Promise(r => s1.on('connect', r));
+    await joinRoom(s1, 'Alice', 'react-malformed');
+    s1.emit('message-reaction', null);
+    s1.emit('message-reaction', { messageId: null, emoji: '👍' });
+    s1.emit('message-reaction', { messageId: 'm1', emoji: 'A'.repeat(50) }); 
+    await new Promise(r => setTimeout(r, 200));
+    s1.disconnect();
+  });
+
+  // HTTP SECURITY
+  await runTest('HTTP - Security headers', async () => {
+    const res = await fetch(`http://localhost:${PORT}/health`);
+    if (!res.headers.get('x-dns-prefetch-control')) throw new Error('Helmet not fully active');
+  });
+
+  // RACE CONDITIONS
+  await runTest('Disconnect - two users, one leaves', async () => {
+    const s1 = createClient();
+    const s2 = createClient();
+    await new Promise(r => s1.on('connect', r));
+    await new Promise(r => s2.on('connect', r));
+    await joinRoom(s1, 'Alice', 'disc-room');
+    await joinRoom(s2, 'Bob', 'disc-room');
+    
+    s1.disconnect(); 
+    await new Promise(r => setTimeout(r, 200));
+    
+    return new Promise((resolve, reject) => {
+      s2.emit('send', { content: 'test' });
+      fetch(`http://localhost:${PORT}/api/stats`)
+        .then(r => r.json())
+        .then(data => {
+           if (data.rooms === 0) reject(new Error('Room was destroyed prematurely'));
+           else { s2.disconnect(); resolve(); }
+        })
+        .catch(e => { s2.disconnect(); reject(e); });
+    });
+  });
+
+  
   serverProcess.kill();
 
   console.log(`\nTests completed: ${testsPassed} passed, ${testsFailed} failed.`);

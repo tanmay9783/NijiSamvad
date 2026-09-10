@@ -61,3 +61,12 @@ A portfolio-grade, full-stack real-time communication application engineered wit
 *Software Engineer*
 
 *Developed as a showcase of secure real-time system architecture and modern frontend engineering.*
+
+## Phase 6 - Security, Functional & Failure Testing
+The architecture has been rigorously tested against edge cases, including:
+- **Ephemeral Room Lifecycle**: Application-controlled room state and encrypted attachment files are strictly deleted when the final participant leaves.
+- **Race conditions**: Simultaneous disconnects and abrupt socket terminations safely clean up memory and disk space without crashing.
+- **No Persistent Chat Database**: Why Redis/database/object storage are intentionally not required? This architecture enforces absolute privacy by ensuring chat history cannot be compromised via server logs or DB leaks; the data only exists in memory while the room is active.
+- **Production CSP**: For production hardening, a Content Security Policy should allow `'self'`, `'unsafe-inline'` (for React), `ws:` / `wss:` (for WebSockets), and `blob:` / `data:` for object URLs and WebRTC streams. Ensure WSS/HTTPS is used in production.
+
+> **Note**: Application-controlled data deletion does not make claims about provider/network/server infrastructure logs, backups, or OS-level storage outside the application's direct control.
