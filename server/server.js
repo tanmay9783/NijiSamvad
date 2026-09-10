@@ -227,6 +227,16 @@ app.get('/api/stats', (req, res) => {
   });
 });
 
+if (process.env.ENABLE_LOAD_METRICS) {
+  app.get('/debug/metrics', (req, res) => {
+    res.status(200).json({
+      memory: process.memoryUsage(),
+      rooms: roomStore.getRoomCount(),
+      users: roomStore.getUserCount()
+    });
+  });
+}
+
 app.post('/api/attachments', async (req, res) => {
   try {
     const roomName = req.headers['x-room-name'];

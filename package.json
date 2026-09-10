@@ -10,7 +10,8 @@
     "server": "node server/server.js",
     "build": "vite build",
     "lint": "oxlint",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "test:load": "node tests/test-load.js"
   },
   "dependencies": {
     "concurrently": "^10.0.5",
