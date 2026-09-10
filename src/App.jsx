@@ -89,6 +89,8 @@ export default function App() {
     return () => clearTimeout(demoIntervalRef.current);
   }, [isDemoMode, isJoined, userName, addMessage]);
 
+  const activeServerUrlRef = useRef('');
+
   const handleJoin = async (name, room, password, target) => {
     setIsConnecting(true);
     setConnectionError('');
@@ -137,6 +139,8 @@ export default function App() {
       ? 'http://localhost:5000' 
       : (import.meta.env.VITE_SERVER_URL || window.location.origin);
     
+    activeServerUrlRef.current = serverUrl === window.location.origin ? '' : serverUrl;
+
     try {
       const newSocket = io(serverUrl, { 
         transports: ['websocket', 'polling'],
@@ -201,7 +205,8 @@ export default function App() {
                 } else if (msgObj.type === 'attachment') {
                   isImage = true;
                   // Fetch encrypted blob from server
-                  const res = await fetch(`/api/attachments/${msgObj.attachmentId}`, {
+                  const apiBase = activeServerUrlRef.current || (import.meta.env.VITE_SERVER_URL || '');
+                  const res = await fetch(`${apiBase}/api/attachments/${msgObj.attachmentId}`, {
                     headers: {
                       'x-room-name': room,
                       'x-auth-hash': authHash || ''
@@ -271,7 +276,8 @@ export default function App() {
         addToast('Encrypting and uploading...', 'info');
         const { ciphertextBlob, attachmentKeyStr, ivStr } = await encryptAttachment(file);
         
-        const uploadRes = await fetch('/api/attachments', {
+        const apiBase = activeServerUrlRef.current || (import.meta.env.VITE_SERVER_URL || '');
+        const uploadRes = await fetch(`${apiBase}/api/attachments`, {
           method: 'POST',
           headers: { 
             'Content-Type': 'application/octet-stream',
