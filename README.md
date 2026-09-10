@@ -70,3 +70,8 @@ The architecture has been rigorously tested against edge cases, including:
 - **Production CSP**: For production hardening, a Content Security Policy should allow `'self'`, `'unsafe-inline'` (for React), `ws:` / `wss:` (for WebSockets), and `blob:` / `data:` for object URLs and WebRTC streams. Ensure WSS/HTTPS is used in production.
 
 > **Note**: Application-controlled data deletion does not make claims about provider/network/server infrastructure logs, backups, or OS-level storage outside the application's direct control.
+
+## Phase 7 - WebRTC Reliability & Call Lifecycle Hardening
+- **Mesh Architecture**: The application employs a WebRTC mesh architecture optimized for small ephemeral rooms. There is no Media Server or SFU to manage scaling. 
+- **Zero-Cost Strategy**: The project explicitly avoids infrastructure dependencies like TURN servers or persistent databases. Direct Peer-to-Peer (P2P) connections are established via STUN. If strict corporate firewalls block direct P2P connections, WebRTC may fail gracefully to a "receive-only" or isolated state without crashing the app.
+- **Race Condition Immunity**: An audited signaling lifecycle ensures that late joiners, colliding connection attempts, and ungraceful disconnects maintain application stability with strict `RTCPeerConnection` cleanup.

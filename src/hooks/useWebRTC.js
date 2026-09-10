@@ -14,6 +14,11 @@ export default function useWebRTC(socket, roomUsers, isCallActive) {
   
   const peersRef = useRef({});
   const localStreamRef = useRef(null);
+  const roomUsersRef = useRef(roomUsers);
+
+  useEffect(() => {
+    roomUsersRef.current = roomUsers;
+  }, [roomUsers]);
 
   // Initialize Media
   const startLocalStream = useCallback(async () => {
@@ -25,29 +30,45 @@ export default function useWebRTC(socket, roomUsers, isCallActive) {
       setLocalStream(stream);
       localStreamRef.current = stream;
 
-      // Start initially muted for safety if desired, but we'll keep enabled for now
       stream.getAudioTracks().forEach(track => track.enabled = mediaState.audio);
       stream.getVideoTracks().forEach(track => track.enabled = mediaState.video);
 
       return stream;
     } catch (err) {
-      console.error("Error accessing media devices.", err);
+      console.warn("Error accessing media devices. Continuing as receive-only.", err);
       return null;
     }
   }, [mediaState]);
 
   const stopLocalStream = useCallback(() => {
     if (localStreamRef.current) {
-      localStreamRef.current.getTracks().forEach(track => track.stop());
+      localStreamRef.current.getTracks().forEach(track => {
+        track.stop();
+      });
       localStreamRef.current = null;
       setLocalStream(null);
     }
   }, []);
 
+  const cleanupPeer = useCallback((id) => {
+    if (peersRef.current[id]) {
+      peersRef.current[id].onicecandidate = null;
+      peersRef.current[id].ontrack = null;
+      peersRef.current[id].onconnectionstatechange = null;
+      peersRef.current[id].close();
+      delete peersRef.current[id];
+    }
+    setRemoteStreams(prev => {
+      const newStreams = { ...prev };
+      delete newStreams[id];
+      return newStreams;
+    });
+  }, []);
+
   const createPeer = useCallback((targetSocketId, stream) => {
     const peer = new RTCPeerConnection(ICE_SERVERS);
     
-    // Add local tracks
+    // Add local tracks if available
     if (stream) {
       stream.getTracks().forEach(track => peer.addTrack(track, stream));
     }
@@ -70,35 +91,57 @@ export default function useWebRTC(socket, roomUsers, isCallActive) {
       }));
     };
 
-    return peer;
-  }, [socket]);
+    // Handle Connection State
+    peer.onconnectionstatechange = () => {
+      if (peer.connectionState === 'failed' || peer.connectionState === 'closed') {
+        cleanupPeer(targetSocketId);
+      }
+    };
 
-  // Handle Call Lifecycle
+    return peer;
+  }, [socket, cleanupPeer]);
+
+  // Handle Call Lifecycle and Dynamic Joins
   useEffect(() => {
     if (!isCallActive || !socket) return;
 
     let isMounted = true;
 
     const initCall = async () => {
-      const stream = await startLocalStream();
-      if (!stream || !isMounted) return;
+      // Only start local stream if not already started
+      if (!localStreamRef.current) {
+        await startLocalStream();
+      }
+      if (!isMounted) return;
 
-      // Create offers for all existing users
-      roomUsers.forEach(async (user) => {
-        if (user.id !== socket.id) {
-          const peer = createPeer(user.id, stream);
+      const activeIds = new Set(roomUsersRef.current.map(u => u.id));
+
+      // Create peers for new users and initiate offers deterministically
+      roomUsersRef.current.forEach(async (user) => {
+        if (user.id !== socket.id && !peersRef.current[user.id]) {
+          const peer = createPeer(user.id, localStreamRef.current);
           peersRef.current[user.id] = peer;
           
-          try {
-            const offer = await peer.createOffer();
-            await peer.setLocalDescription(offer);
-            socket.emit('webrtc-offer', {
-              targetSocketId: user.id,
-              sdp: peer.localDescription
-            });
-          } catch (e) {
-            console.error("Error creating offer", e);
+          // Deterministic initiator: larger socket.id creates the offer
+          if (socket.id > user.id) {
+            try {
+              const offer = await peer.createOffer();
+              await peer.setLocalDescription(offer);
+              socket.emit('webrtc-offer', {
+                targetSocketId: user.id,
+                sdp: peer.localDescription
+              });
+            } catch (e) {
+              console.error("Error creating offer", e);
+            }
           }
+        }
+      });
+
+      // Cleanup peers for users who left
+      Object.keys(peersRef.current).forEach(id => {
+        if (!activeIds.has(id)) {
+          cleanupPeer(id);
         }
       });
     };
@@ -106,20 +149,31 @@ export default function useWebRTC(socket, roomUsers, isCallActive) {
     initCall();
 
     return () => {
+      // We don't cleanup all peers on every dependency change, 
+      // but we do set isMounted to false to prevent late streams from applying
       isMounted = false;
-      // Cleanup all peers
-      Object.values(peersRef.current).forEach(peer => peer.close());
-      peersRef.current = {};
-      setRemoteStreams({});
-      stopLocalStream();
     };
-  }, [isCallActive, socket, roomUsers, createPeer, startLocalStream, stopLocalStream]);
+  }, [isCallActive, socket, roomUsers, createPeer, startLocalStream, cleanupPeer]);
+
+  // Full cleanup on Call End
+  useEffect(() => {
+    if (!isCallActive) {
+      Object.keys(peersRef.current).forEach(id => {
+        cleanupPeer(id);
+      });
+      stopLocalStream();
+    }
+  }, [isCallActive, cleanupPeer, stopLocalStream]);
 
   // Handle Socket Signaling Events
   useEffect(() => {
     if (!socket || !isCallActive) return;
 
+    const isValidSender = (id) => roomUsersRef.current.some(u => u.id === id);
+
     const handleOffer = async ({ sdp, callerSocketId }) => {
+      if (!isValidSender(callerSocketId)) return;
+
       let peer = peersRef.current[callerSocketId];
       if (!peer) {
         peer = createPeer(callerSocketId, localStreamRef.current);
@@ -140,6 +194,7 @@ export default function useWebRTC(socket, roomUsers, isCallActive) {
     };
 
     const handleAnswer = async ({ sdp, answererSocketId }) => {
+      if (!isValidSender(answererSocketId)) return;
       const peer = peersRef.current[answererSocketId];
       if (peer) {
         try {
@@ -151,6 +206,7 @@ export default function useWebRTC(socket, roomUsers, isCallActive) {
     };
 
     const handleIceCandidate = async ({ candidate, senderSocketId }) => {
+      if (!isValidSender(senderSocketId)) return;
       const peer = peersRef.current[senderSocketId];
       if (peer) {
         try {
@@ -161,45 +217,16 @@ export default function useWebRTC(socket, roomUsers, isCallActive) {
       }
     };
 
-    // Listen for disconnects
-    const handleUserLeft = (_leftName) => {
-        // Find user by name in roomUsers to get their socket id
-        // In our current architecture, 'left' event provides username.
-        // It's better to just wait for roomUsers to update, which triggers cleanup.
-    };
-
     socket.on('webrtc-offer', handleOffer);
     socket.on('webrtc-answer', handleAnswer);
     socket.on('webrtc-ice-candidate', handleIceCandidate);
-    socket.on('left', handleUserLeft);
 
     return () => {
       socket.off('webrtc-offer', handleOffer);
       socket.off('webrtc-answer', handleAnswer);
       socket.off('webrtc-ice-candidate', handleIceCandidate);
-      socket.off('left', handleUserLeft);
     };
   }, [socket, isCallActive, createPeer]);
-
-  // Cleanup remote streams when users leave
-  useEffect(() => {
-    const activeIds = new Set(roomUsers.map(u => u.id));
-    setRemoteStreams(prev => {
-      const newStreams = { ...prev };
-      let changed = false;
-      Object.keys(newStreams).forEach(id => {
-        if (!activeIds.has(id)) {
-          delete newStreams[id];
-          changed = true;
-          if (peersRef.current[id]) {
-            peersRef.current[id].close();
-            delete peersRef.current[id];
-          }
-        }
-      });
-      return changed ? newStreams : prev;
-    });
-  }, [roomUsers]);
 
   const toggleAudio = () => {
     if (localStreamRef.current) {
