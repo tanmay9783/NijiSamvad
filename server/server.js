@@ -487,6 +487,69 @@ io.on('connection', (socket) => {
     } catch (e) {}
   });
 
+  // Call Invitation Signaling Events
+  socket.on('call-invite', () => {
+    try {
+      if (!currentRoom) return;
+      if (!rateLimitStore.check(socket.id, 'webrtc')) return;
+      socket.to(currentRoom).emit('call-invite', {
+        callerSocketId: socket.id,
+        callerName: currentUser
+      });
+    } catch (e) {}
+  });
+
+  socket.on('call-accept', (payload) => {
+    try {
+      if (!rateLimitStore.check(socket.id, 'webrtc')) return;
+      if (!payload || typeof payload !== 'object') return;
+      const { targetSocketId } = payload;
+      if (typeof targetSocketId !== 'string') return;
+      if (!validateWebrtcAuth(targetSocketId)) return;
+
+      io.to(targetSocketId).emit('call-accept', {
+        accepterSocketId: socket.id,
+        accepterName: currentUser
+      });
+    } catch (e) {}
+  });
+
+  socket.on('call-decline', (payload) => {
+    try {
+      if (!rateLimitStore.check(socket.id, 'webrtc')) return;
+      if (!payload || typeof payload !== 'object') return;
+      const { targetSocketId } = payload;
+      if (typeof targetSocketId !== 'string') return;
+      if (!validateWebrtcAuth(targetSocketId)) return;
+
+      io.to(targetSocketId).emit('call-decline', {
+        declinerSocketId: socket.id,
+        declinerName: currentUser
+      });
+    } catch (e) {}
+  });
+
+  socket.on('call-cancel', () => {
+    try {
+      if (!currentRoom) return;
+      if (!rateLimitStore.check(socket.id, 'webrtc')) return;
+      socket.to(currentRoom).emit('call-cancel', {
+        callerSocketId: socket.id
+      });
+    } catch (e) {}
+  });
+
+  socket.on('call-ended', () => {
+    try {
+      if (!currentRoom) return;
+      if (!rateLimitStore.check(socket.id, 'webrtc')) return;
+      socket.to(currentRoom).emit('call-ended', {
+        socketId: socket.id,
+        name: currentUser
+      });
+    } catch (e) {}
+  });
+
   socket.on('leave-room', () => {
     try {
       if (currentRoom) {

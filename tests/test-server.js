@@ -416,6 +416,46 @@ async function runServerTests() {
     s1.disconnect();
   });
 
+  // Phase 11 Call Invitation Signaling Tests
+  await runTest('WebRTC Call Invitation - invite, accept, and decline signaling', async () => {
+    const s1 = createClient();
+    const s2 = createClient();
+    const s3 = createClient();
+    await new Promise(r => s1.on('connect', r));
+    await new Promise(r => s2.on('connect', r));
+    await new Promise(r => s3.on('connect', r));
+
+    await joinRoom(s1, 'Alice', 'call-invite-room');
+    await joinRoom(s2, 'Bob', 'call-invite-room');
+    await joinRoom(s3, 'Charlie', 'call-invite-room');
+
+    // 1. s1 invites
+    const invitePromise = new Promise((resolve) => {
+      s2.once('call-invite', (data) => resolve(data));
+    });
+    s1.emit('call-invite');
+    const inviteData = await invitePromise;
+    if (inviteData.callerName !== 'Alice') throw new Error('Caller name mismatch');
+
+    // 2. s2 accepts
+    const acceptPromise = new Promise((resolve) => {
+      s1.once('call-accept', (data) => resolve(data));
+    });
+    s2.emit('call-accept', { targetSocketId: s1.id });
+    const acceptData = await acceptPromise;
+    if (acceptData.accepterName !== 'Bob') throw new Error('Accepter name mismatch');
+
+    // 3. s3 declines
+    const declinePromise = new Promise((resolve) => {
+      s1.once('call-decline', (data) => resolve(data));
+    });
+    s3.emit('call-decline', { targetSocketId: s1.id });
+    const declineData = await declinePromise;
+    if (declineData.declinerName !== 'Charlie') throw new Error('Decliner name mismatch');
+
+    s1.disconnect(); s2.disconnect(); s3.disconnect();
+  });
+
   // HTTP SECURITY
   await runTest('HTTP - Security headers', async () => {
     const res = await fetch(`http://localhost:${PORT}/api/stats`);

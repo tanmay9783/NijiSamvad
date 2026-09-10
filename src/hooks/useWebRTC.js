@@ -11,13 +11,20 @@ const ICE_SERVERS = {
   ]
 };
 
-export default function useWebRTC(socket, roomUsers, isCallActive, setIsCallActive) {
+export default function useWebRTC(socket, roomUsers) {
+  const [callState, setCallState] = useState('idle'); // idle, incoming, outgoing, connecting, connected, ended
+  const [incomingCall, setIncomingCall] = useState(null); // { callerSocketId, callerName }
+  const [activeCallRoom, setActiveCallRoom] = useState(false); // room has an active call
   const [localStream, setLocalStream] = useState(null);
   const [remoteStreams, setRemoteStreams] = useState({});
   const [mediaState, setMediaState] = useState({ audio: true, video: true });
-  
+  const [isScreenSharing, setIsScreenSharing] = useState(false);
+  const [acceptedPeers, setAcceptedPeers] = useState({}); // socketId -> name
+
   const peersRef = useRef({});
   const localStreamRef = useRef(null);
+  const displayTrackRef = useRef(null);
+  const cameraVideoTrackRef = useRef(null);
   const roomUsersRef = useRef(roomUsers);
   const candidateQueueRef = useRef({});
 
@@ -25,7 +32,7 @@ export default function useWebRTC(socket, roomUsers, isCallActive, setIsCallActi
     roomUsersRef.current = roomUsers;
   }, [roomUsers]);
 
-  // Initialize Media
+  // Initialize Local Camera/Microphone Stream
   const startLocalStream = useCallback(async () => {
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ 
@@ -34,6 +41,9 @@ export default function useWebRTC(socket, roomUsers, isCallActive, setIsCallActi
       });
       setLocalStream(stream);
       localStreamRef.current = stream;
+
+      const videoTrack = stream.getVideoTracks()[0];
+      if (videoTrack) cameraVideoTrackRef.current = videoTrack;
 
       stream.getAudioTracks().forEach(track => track.enabled = mediaState.audio);
       stream.getVideoTracks().forEach(track => track.enabled = mediaState.video);
@@ -46,6 +56,10 @@ export default function useWebRTC(socket, roomUsers, isCallActive, setIsCallActi
   }, [mediaState]);
 
   const stopLocalStream = useCallback(() => {
+    if (displayTrackRef.current) {
+      displayTrackRef.current.stop();
+      displayTrackRef.current = null;
+    }
     if (localStreamRef.current) {
       localStreamRef.current.getTracks().forEach(track => {
         track.stop();
@@ -53,6 +67,8 @@ export default function useWebRTC(socket, roomUsers, isCallActive, setIsCallActi
       localStreamRef.current = null;
       setLocalStream(null);
     }
+    cameraVideoTrackRef.current = null;
+    setIsScreenSharing(false);
   }, []);
 
   const cleanupPeer = useCallback((id) => {
@@ -64,6 +80,11 @@ export default function useWebRTC(socket, roomUsers, isCallActive, setIsCallActi
       delete peersRef.current[id];
     }
     delete candidateQueueRef.current[id];
+    setAcceptedPeers(prev => {
+      const copy = { ...prev };
+      delete copy[id];
+      return copy;
+    });
     setRemoteStreams(prev => {
       const newStreams = { ...prev };
       delete newStreams[id];
@@ -106,12 +127,15 @@ export default function useWebRTC(socket, roomUsers, isCallActive, setIsCallActi
           ...prev,
           [targetSocketId]: incomingStream
         }));
+        setCallState('connected');
       }
     };
 
     // Handle Connection State
     peer.onconnectionstatechange = () => {
-      if (peer.connectionState === 'failed' || peer.connectionState === 'closed') {
+      if (peer.connectionState === 'connected') {
+        setCallState('connected');
+      } else if (peer.connectionState === 'failed' || peer.connectionState === 'closed') {
         cleanupPeer(targetSocketId);
       }
     };
@@ -134,78 +158,211 @@ export default function useWebRTC(socket, roomUsers, isCallActive, setIsCallActi
     }
   }, []);
 
-  // Handle Call Lifecycle and Dynamic Joins
-  useEffect(() => {
-    if (!isCallActive || !socket) return;
+  // Initiate Call: Broadcast invitation to same-room users
+  const startCall = useCallback(async () => {
+    if (!socket) return;
+    setCallState('outgoing');
+    setActiveCallRoom(true);
+    await startLocalStream();
+    socket.emit('call-invite');
+  }, [socket, startLocalStream]);
 
-    let isMounted = true;
+  // Accept Call Invitation (or join active call)
+  const acceptCall = useCallback(async (callerId) => {
+    if (!socket) return;
+    const targetId = callerId || (incomingCall ? incomingCall.callerSocketId : null);
+    setIncomingCall(null);
+    setCallState('connecting');
+    setActiveCallRoom(true);
 
-    const initCall = async () => {
-      if (!localStreamRef.current) {
-        await startLocalStream();
+    const stream = await startLocalStream();
+
+    if (targetId) {
+      socket.emit('call-accept', { targetSocketId: targetId });
+      
+      // Initiate offer if socket.id > targetId
+      if (socket.id > targetId && !peersRef.current[targetId]) {
+        const peer = createPeer(targetId, stream);
+        peersRef.current[targetId] = peer;
+        try {
+          const offer = await peer.createOffer();
+          await peer.setLocalDescription(offer);
+          socket.emit('webrtc-offer', { targetSocketId: targetId, sdp: peer.localDescription });
+        } catch (e) {
+          console.error("Error creating offer", e);
+        }
       }
-      if (!isMounted) return;
+    } else {
+      // Joining active room call: notify all peers in room
+      roomUsersRef.current.forEach(u => {
+        if (u.id !== socket.id) {
+          socket.emit('call-accept', { targetSocketId: u.id });
+        }
+      });
+    }
+  }, [socket, incomingCall, startLocalStream, createPeer]);
 
-      const activeIds = new Set(roomUsersRef.current.map(u => u.id));
+  // Decline Call Invitation
+  const declineCall = useCallback(() => {
+    if (socket && incomingCall) {
+      socket.emit('call-decline', { targetSocketId: incomingCall.callerSocketId });
+    }
+    setIncomingCall(null);
+    setCallState('idle');
+  }, [socket, incomingCall]);
 
-      // Initiate offers for peers deterministically (socket.id > user.id creates offer to avoid glare/collision)
-      for (const user of roomUsersRef.current) {
-        if (user.id !== socket.id && !peersRef.current[user.id]) {
-          if (socket.id > user.id) {
-            const peer = createPeer(user.id, localStreamRef.current);
-            peersRef.current[user.id] = peer;
-            
-            try {
-              const offer = await peer.createOffer();
-              await peer.setLocalDescription(offer);
-              socket.emit('webrtc-offer', {
-                targetSocketId: user.id,
-                sdp: peer.localDescription
-              });
-            } catch (e) {
-              console.error("Error creating offer", e);
-            }
+  // Cancel Outgoing Call
+  const cancelCall = useCallback(() => {
+    if (socket) {
+      socket.emit('call-cancel');
+    }
+    stopLocalStream();
+    setCallState('idle');
+    setActiveCallRoom(false);
+  }, [socket, stopLocalStream]);
+
+  // End / Leave Call
+  const endCall = useCallback(() => {
+    if (socket) {
+      socket.emit('call-ended');
+    }
+    Object.keys(peersRef.current).forEach(id => {
+      cleanupPeer(id);
+    });
+    stopLocalStream();
+    setCallState('idle');
+    setActiveCallRoom(false);
+  }, [socket, cleanupPeer, stopLocalStream]);
+
+  // Screen Sharing Implementation using RTCRtpSender.replaceTrack()
+  const stopScreenShare = useCallback(async () => {
+    if (displayTrackRef.current) {
+      displayTrackRef.current.stop();
+      displayTrackRef.current = null;
+    }
+    setIsScreenSharing(false);
+
+    const replacementTrack = mediaState.video ? cameraVideoTrackRef.current : null;
+
+    // Replace display track back to camera track across all active peer connections
+    for (const peerId of Object.keys(peersRef.current)) {
+      const peer = peersRef.current[peerId];
+      if (peer) {
+        const senders = peer.getSenders();
+        const videoSender = senders.find(s => s.track && s.track.kind === 'video');
+        if (videoSender) {
+          try {
+            await videoSender.replaceTrack(replacementTrack);
+          } catch (e) {
+            console.error("Error restoring camera track", e);
+          }
+        }
+      }
+    }
+  }, [mediaState.video]);
+
+  const startScreenShare = useCallback(async () => {
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getDisplayMedia) {
+      throw new Error("Screen sharing is not supported by your browser.");
+    }
+
+    try {
+      const displayStream = await navigator.mediaDevices.getDisplayMedia({ video: true });
+      const displayTrack = displayStream.getVideoTracks()[0];
+      if (!displayTrack) return;
+
+      displayTrackRef.current = displayTrack;
+      setIsScreenSharing(true);
+
+      // Replace video track across all active RTCPeerConnections
+      for (const peerId of Object.keys(peersRef.current)) {
+        const peer = peersRef.current[peerId];
+        if (peer) {
+          const senders = peer.getSenders();
+          const videoSender = senders.find(s => s.track && (s.track.kind === 'video' || s.track === cameraVideoTrackRef.current));
+          if (videoSender) {
+            await videoSender.replaceTrack(displayTrack);
           }
         }
       }
 
-      // Cleanup peers for users who left
-      Object.keys(peersRef.current).forEach(id => {
-        if (!activeIds.has(id)) {
-          cleanupPeer(id);
-        }
-      });
-    };
-
-    initCall();
-
-    return () => {
-      isMounted = false;
-    };
-  }, [isCallActive, socket, roomUsers, createPeer, startLocalStream, cleanupPeer]);
-
-  // Full cleanup on Call End
-  useEffect(() => {
-    if (!isCallActive) {
-      Object.keys(peersRef.current).forEach(id => {
-        cleanupPeer(id);
-      });
-      stopLocalStream();
+      // Handle user clicking native browser "Stop sharing" bar
+      displayTrack.onended = () => {
+        stopScreenShare();
+      };
+    } catch (err) {
+      if (err.name !== 'NotAllowedError') {
+        console.error("Screen share error", err);
+        throw err;
+      }
     }
-  }, [isCallActive, cleanupPeer, stopLocalStream]);
+  }, [stopScreenShare]);
 
-  // ALWAYS active Socket Signaling Events for incoming call offers/answers
+  // ALWAYS active Socket Signaling Events for call invitations and WebRTC
   useEffect(() => {
     if (!socket) return;
 
     const isValidSender = (id) => roomUsersRef.current.some(u => u.id === id);
 
+    const handleCallInvite = ({ callerSocketId, callerName }) => {
+      if (!isValidSender(callerSocketId)) return;
+      if (callState === 'idle') {
+        setIncomingCall({ callerSocketId, callerName });
+        setCallState('incoming');
+      }
+      setActiveCallRoom(true);
+    };
+
+    const handleCallAccept = async ({ accepterSocketId, accepterName }) => {
+      if (!isValidSender(accepterSocketId)) return;
+      setAcceptedPeers(prev => ({ ...prev, [accepterSocketId]: accepterName }));
+      setActiveCallRoom(true);
+
+      if (callState === 'outgoing' || callState === 'connecting' || callState === 'connected') {
+        setCallState('connecting');
+
+        let currentStream = localStreamRef.current;
+        if (!currentStream) {
+          currentStream = await startLocalStream();
+        }
+
+        // Initiate offer deterministically if socket.id > accepterSocketId
+        if (socket.id > accepterSocketId && !peersRef.current[accepterSocketId]) {
+          const peer = createPeer(accepterSocketId, currentStream);
+          peersRef.current[accepterSocketId] = peer;
+          try {
+            const offer = await peer.createOffer();
+            await peer.setLocalDescription(offer);
+            socket.emit('webrtc-offer', { targetSocketId: accepterSocketId, sdp: peer.localDescription });
+          } catch (e) {
+            console.error("Error creating offer after accept", e);
+          }
+        }
+      }
+    };
+
+    const handleCallDecline = ({ declinerSocketId, declinerName }) => {
+      if (!isValidSender(declinerSocketId)) return;
+      setAcceptedPeers(prev => {
+        const copy = { ...prev };
+        delete copy[declinerSocketId];
+        return copy;
+      });
+    };
+
+    const handleCallCancel = ({ callerSocketId }) => {
+      if (incomingCall && incomingCall.callerSocketId === callerSocketId) {
+        setIncomingCall(null);
+        setCallState('idle');
+      }
+    };
+
+    const handleCallEnded = ({ socketId }) => {
+      cleanupPeer(socketId);
+    };
+
     const handleOffer = async ({ sdp, callerSocketId }) => {
       if (!isValidSender(callerSocketId)) return;
-
-      if (setIsCallActive) {
-        setIsCallActive(true);
-      }
 
       let currentStream = localStreamRef.current;
       if (!currentStream) {
@@ -219,11 +376,7 @@ export default function useWebRTC(socket, roomUsers, isCallActive, setIsCallActi
       const isPolite = socket.id < callerSocketId;
 
       if (isOfferCollision) {
-        if (!isPolite) {
-          // Impolite peer ignores offer collision
-          return;
-        }
-        // Polite peer rolls back local offer to accept remote offer
+        if (!isPolite) return; // Impolite peer ignores colliding offer
         try {
           await peer.setLocalDescription({ type: 'rollback' });
         } catch (e) {}
@@ -244,6 +397,7 @@ export default function useWebRTC(socket, roomUsers, isCallActive, setIsCallActi
           targetSocketId: callerSocketId,
           sdp: peer.localDescription
         });
+        setCallState('connected');
       } catch (e) {
         console.error("Error handling offer", e);
       }
@@ -256,6 +410,7 @@ export default function useWebRTC(socket, roomUsers, isCallActive, setIsCallActi
         try {
           await peer.setRemoteDescription(new RTCSessionDescription(sdp));
           await flushIceCandidates(answererSocketId, peer);
+          setCallState('connected');
         } catch (e) {
           console.error("Error handling answer", e);
         }
@@ -279,16 +434,26 @@ export default function useWebRTC(socket, roomUsers, isCallActive, setIsCallActi
       }
     };
 
+    socket.on('call-invite', handleCallInvite);
+    socket.on('call-accept', handleCallAccept);
+    socket.on('call-decline', handleCallDecline);
+    socket.on('call-cancel', handleCallCancel);
+    socket.on('call-ended', handleCallEnded);
     socket.on('webrtc-offer', handleOffer);
     socket.on('webrtc-answer', handleAnswer);
     socket.on('webrtc-ice-candidate', handleIceCandidate);
 
     return () => {
+      socket.off('call-invite', handleCallInvite);
+      socket.off('call-accept', handleCallAccept);
+      socket.off('call-decline', handleCallDecline);
+      socket.off('call-cancel', handleCallCancel);
+      socket.off('call-ended', handleCallEnded);
       socket.off('webrtc-offer', handleOffer);
       socket.off('webrtc-answer', handleAnswer);
       socket.off('webrtc-ice-candidate', handleIceCandidate);
     };
-  }, [socket, createPeer, startLocalStream, flushIceCandidates, setIsCallActive]);
+  }, [socket, callState, incomingCall, createPeer, startLocalStream, flushIceCandidates, cleanupPeer]);
 
   const toggleAudio = () => {
     if (localStreamRef.current) {
@@ -311,9 +476,21 @@ export default function useWebRTC(socket, roomUsers, isCallActive, setIsCallActi
   };
 
   return {
+    callState,
+    incomingCall,
+    activeCallRoom,
     localStream,
     remoteStreams,
     mediaState,
+    isScreenSharing,
+    acceptedPeers,
+    startCall,
+    acceptCall,
+    declineCall,
+    cancelCall,
+    endCall,
+    startScreenShare,
+    stopScreenShare,
     toggleAudio,
     toggleVideo
   };

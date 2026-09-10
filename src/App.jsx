@@ -11,6 +11,7 @@ import UserDrawer from './components/UserDrawer';
 import SecurityModal from './components/SecurityModal';
 import CallInterface from './components/CallInterface';
 import Toast from './components/Toast';
+import IncomingCallModal from './components/IncomingCallModal';
 import './index.css';
 
 export default function App() {
@@ -32,21 +33,31 @@ export default function App() {
   // Modals & Drawers
   const [showDrawer, setShowDrawer] = useState(false);
   const [showSecurity, setShowSecurity] = useState(false);
+  const [showChatInCall, setShowChatInCall] = useState(true);
   
   // Demo Mode state
   const [isDemoMode, setIsDemoMode] = useState(false);
   const demoIntervalRef = useRef(null);
 
-  // WebRTC Call State
-  const [isCallActive, setIsCallActive] = useState(false);
-
+  // WebRTC Call State Hook (Phase 11)
   const {
+    callState,
+    incomingCall,
+    activeCallRoom,
     localStream,
     remoteStreams,
     mediaState,
+    isScreenSharing,
+    startCall,
+    acceptCall,
+    declineCall,
+    cancelCall,
+    endCall,
+    startScreenShare,
+    stopScreenShare,
     toggleAudio,
     toggleVideo
-  } = useWebRTC(socket, users, isCallActive, setIsCallActive);
+  } = useWebRTC(socket, users);
 
   const addToast = (message, type = 'info') => {
     const id = Date.now();
@@ -383,9 +394,8 @@ export default function App() {
     }
     setIsJoined(false);
     setIsDemoMode(false);
-    setIsCallActive(false);
+    endCall();
 
-    // Revoke object URLs to prevent memory leaks
     messages.forEach(msg => {
       if (msg.isImage && msg.text && msg.text.startsWith('blob:')) {
         URL.revokeObjectURL(msg.text);
@@ -401,13 +411,27 @@ export default function App() {
     addToast('Left the chat room', 'info');
   };
 
-  const toggleCall = () => {
+  const handleStartCall = () => {
     if (isDemoMode) {
       addToast('WebRTC Calls are not available in Offline Demo mode.', 'error');
       return;
     }
-    setIsCallActive(!isCallActive);
+    startCall();
   };
+
+  const handleToggleScreenShare = async () => {
+    if (isScreenSharing) {
+      await stopScreenShare();
+    } else {
+      try {
+        await startScreenShare();
+      } catch (err) {
+        addToast(err.message || 'Screen sharing not allowed or unsupported', 'error');
+      }
+    }
+  };
+
+  const isInCall = callState === 'outgoing' || callState === 'connecting' || callState === 'connected';
 
   return (
     <div className="app">
@@ -429,8 +453,11 @@ export default function App() {
             onOpenDrawer={() => setShowDrawer(true)}
             onOpenSecurity={() => setShowSecurity(true)}
             isSecure={!!encryptionKey}
-            isCallActive={isCallActive}
-            onToggleCall={toggleCall}
+            callState={callState}
+            activeCallRoom={activeCallRoom}
+            onStartCall={handleStartCall}
+            onAcceptCall={acceptCall}
+            onEndCall={endCall}
           />
           
           <UserDrawer 
@@ -448,20 +475,35 @@ export default function App() {
             roomName={roomName}
           />
 
-          {isCallActive && (
+          <IncomingCallModal 
+            incomingCall={incomingCall}
+            onAccept={() => acceptCall()}
+            onDecline={declineCall}
+          />
+
+          {isInCall && (
             <CallInterface 
+              callState={callState}
               localStream={localStream}
               remoteStreams={remoteStreams}
               mediaState={mediaState}
+              isScreenSharing={isScreenSharing}
               onToggleAudio={toggleAudio}
               onToggleVideo={toggleVideo}
-              onEndCall={() => setIsCallActive(false)}
+              onToggleScreenShare={handleToggleScreenShare}
+              onCancelCall={cancelCall}
+              onEndCall={endCall}
+              showChat={showChatInCall}
+              onToggleChat={() => setShowChatInCall(prev => !prev)}
             />
           )}
 
-          <MessageList messages={messages} _currentUser={userName} />
-          
-          <MessageInput onSendMessage={handleSendMessage} onTyping={handleTyping} />
+          {(!isInCall || showChatInCall) && (
+            <>
+              <MessageList messages={messages} _currentUser={userName} />
+              <MessageInput onSendMessage={handleSendMessage} onTyping={handleTyping} />
+            </>
+          )}
         </>
       )}
     </div>

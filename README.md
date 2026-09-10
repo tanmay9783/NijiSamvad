@@ -81,3 +81,12 @@ The architecture has been rigorously tested against edge cases, including:
 - **Content Security Policy (CSP)**: Helmet is configured with a strict CSP. In production, inline scripts and eval are disabled, allowing only local origins for API and WebRTC/Blob streams.
 - **CORS Isolation**: Access is restricted strictly to the configured `CLIENT_ORIGIN` environment variable.
 - **No Persistent Storage Guarantee**: The application guarantees that all in-memory room state and temporary encrypted attachment files are deleted when the final participant leaves. However, this does NOT make guarantees about external infrastructure (e.g. reverse proxy logs, OS-level filesystem caches, hosting provider backups).
+
+## Phase 11 - Professional Call & Video Experience
+- **Explicit Call Permission**: Incoming WebRTC calls must be explicitly accepted via `[ Accept ]` or declined via `[ Decline ]`. No WebRTC SDP offers are created or sent to recipients until they accept.
+- **Group Call Invitations**: Room calls selectively connect only participants who accept. Late joiners see an active `"Join Call"` banner without being forced into an ongoing call.
+- **Peer-to-Peer Screen Sharing**: Users can share their screen in real-time via `getDisplayMedia()`, using `RTCRtpSender.replaceTrack()` without disrupting active microphone audio or requiring media servers.
+- **Meeting / Video Mode**: Dedicated video call UI with responsive participant grids, featured video tile selection, chat toggle, and native Fullscreen API integration.
+- **Recommended Call Scale**: Optimized for mesh peer-to-peer calls up to **6 participants** (experimental up to 8).
+- **Audio Note**: Music/audio-file sharing is intentionally not implemented in this phase.
+
