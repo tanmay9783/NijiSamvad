@@ -3,7 +3,11 @@ import { useState, useEffect, useRef, useCallback } from 'react';
 const ICE_SERVERS = {
   iceServers: [
     { urls: 'stun:stun.l.google.com:19302' },
-    { urls: 'stun:stun1.l.google.com:19302' }
+    { urls: 'stun:stun1.l.google.com:19302' },
+    { urls: 'stun:stun2.l.google.com:19302' },
+    { urls: 'stun:stun3.l.google.com:19302' },
+    { urls: 'stun:stun4.l.google.com:19302' },
+    { urls: 'stun:global.stun.twilio.com:3478' }
   ]
 };
 
@@ -92,10 +96,15 @@ export default function useWebRTC(socket, roomUsers, isCallActive, setIsCallActi
 
     // Handle incoming streams
     peer.ontrack = (event) => {
-      if (event.streams && event.streams[0]) {
+      let incomingStream = (event.streams && event.streams[0]) ? event.streams[0] : null;
+      if (!incomingStream && event.track) {
+        incomingStream = new MediaStream([event.track]);
+      }
+
+      if (incomingStream) {
         setRemoteStreams(prev => ({
           ...prev,
-          [targetSocketId]: event.streams[0]
+          [targetSocketId]: incomingStream
         }));
       }
     };

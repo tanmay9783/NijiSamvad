@@ -4,8 +4,15 @@ export default function VideoPlayer({ stream, isLocal, muted }) {
   const videoRef = useRef(null);
 
   useEffect(() => {
-    if (videoRef.current && stream) {
-      videoRef.current.srcObject = stream;
+    const videoEl = videoRef.current;
+    if (videoEl && stream) {
+      videoEl.srcObject = stream;
+      const playPromise = videoEl.play();
+      if (playPromise !== undefined) {
+        playPromise.catch((err) => {
+          console.warn("Video playback error or autoplay policy block:", err);
+        });
+      }
     }
   }, [stream]);
 
