@@ -42,9 +42,9 @@ If you prefer to host the frontend on a CDN (like Vercel or Netlify) and the bac
 1. **Backend (VPS)**:
    Deploy the Node.js app as usual, but the frontend files in `dist/` won't be requested. Ensure `CLIENT_ORIGIN` matches your CDN domain.
 2. **Frontend (CDN)**:
-   Set the `VITE_SERVER_URL` environment variable during the Vite build:
+   Set the `VITE_API_URL` environment variable during the Vite build:
    ```bash
-   VITE_SERVER_URL=https://your-backend-domain.com npm run build
+   VITE_API_URL=https://your-backend-domain.com npm run build
    ```
 
 ## 3. Mandatory Reverse Proxy Requirements

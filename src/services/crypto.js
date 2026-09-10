@@ -1,23 +1,35 @@
 // src/services/crypto.js
 
+// Generate a cryptographically secure random room secret using Web Crypto
+export const generateSecureRoomSecret = () => {
+  const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789!@#$%^&*';
+  const randomValues = new Uint32Array(24);
+  crypto.getRandomValues(randomValues);
+  let secret = '';
+  for (let i = 0; i < 24; i++) {
+    secret += chars.charAt(randomValues[i] % chars.length);
+  }
+  return secret;
+};
+
 // Generate a visually verifiable fingerprint (like WhatsApp/Signal safety numbers)
-export const generateRoomFingerprint = async (roomName, password) => {
-  if (!password) return null;
+export const generateRoomFingerprint = async (roomName, secret) => {
+  if (!secret) return null;
   const encoder = new TextEncoder();
-  const data = encoder.encode(roomName + ':' + password);
+  const data = encoder.encode(roomName + ':' + secret);
   const hashBuffer = await crypto.subtle.digest('SHA-256', data);
   const hashArray = Array.from(new Uint8Array(hashBuffer));
   const hashHex = hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
   return hashHex.substring(0, 24).match(/.{1,4}/g).join(' ').toUpperCase();
 };
 
-export const deriveKeys = async (password, roomName) => {
-  if (!password) return null;
+export const deriveKeys = async (secret, roomName) => {
+  if (!secret) return null;
   
   const encoder = new TextEncoder();
   const keyMaterial = await crypto.subtle.importKey(
     "raw",
-    encoder.encode(password),
+    encoder.encode(secret),
     { name: "PBKDF2" },
     false,
     ["deriveBits", "deriveKey"]

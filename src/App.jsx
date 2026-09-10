@@ -46,7 +46,7 @@ export default function App() {
     mediaState,
     toggleAudio,
     toggleVideo
-  } = useWebRTC(socket, users, isCallActive);
+  } = useWebRTC(socket, users, isCallActive, setIsCallActive);
 
   const addToast = (message, type = 'info') => {
     const id = Date.now();
@@ -91,33 +91,34 @@ export default function App() {
 
   const activeServerUrlRef = useRef('');
 
-  const handleJoin = async (name, room, password, target) => {
+  const handleJoin = async (name, room, secret, target) => {
     setIsConnecting(true);
     setConnectionError('');
     setRoomName(room);
     setUserName(name);
+
+    if (!secret || secret.trim() === '') {
+      setIsConnecting(false);
+      setConnectionError('Room Secret / E2EE Security Key is required for encrypted communication.');
+      return;
+    }
+
     let finalEncryptionKey = null;
     let authHash = null;
 
-    if (password) {
-      try {
-        const keys = await deriveKeys(password, room);
-        finalEncryptionKey = keys.encryptionKey;
-        authHash = keys.authHash;
-        setEncryptionKey(finalEncryptionKey);
-        setAuthHash(authHash);
-        
-        const fingerprint = await generateRoomFingerprint(room, password);
-        setRoomFingerprint(fingerprint);
-      } catch (err) {
-        setIsConnecting(false);
-        setConnectionError('Failed to initialize encryption.');
-        return;
-      }
-    } else {
-      setEncryptionKey(null);
-      setAuthHash(null);
-      setRoomFingerprint('');
+    try {
+      const keys = await deriveKeys(secret, room);
+      finalEncryptionKey = keys.encryptionKey;
+      authHash = keys.authHash;
+      setEncryptionKey(finalEncryptionKey);
+      setAuthHash(authHash);
+      
+      const fingerprint = await generateRoomFingerprint(room, secret);
+      setRoomFingerprint(fingerprint);
+    } catch (err) {
+      setIsConnecting(false);
+      setConnectionError('Failed to derive encryption key from Room Secret.');
+      return;
     }
 
     if (target === 'demo') {
@@ -137,7 +138,7 @@ export default function App() {
 
     const serverUrl = target === 'local' 
       ? 'http://localhost:5000' 
-      : (import.meta.env.VITE_SERVER_URL || window.location.origin);
+      : (import.meta.env.VITE_API_URL || window.location.origin);
     
     activeServerUrlRef.current = serverUrl === window.location.origin ? '' : serverUrl;
 
@@ -189,47 +190,60 @@ export default function App() {
       });
 
       newSocket.on('receive', async (payload) => {
-        let finalMessage = payload.message;
+        let rawContent = payload.message;
+        let decryptedStr = rawContent;
         let isImage = false;
         
         if (finalEncryptionKey) {
           try {
-            const decryptedJsonStr = await decryptMessage(payload.message, finalEncryptionKey);
-            
-            // Check if it's our new structured protocol
-            try {
-              const msgObj = JSON.parse(decryptedJsonStr);
-              if (msgObj.version === 1) {
-                if (msgObj.type === 'text') {
-                  finalMessage = msgObj.text;
-                } else if (msgObj.type === 'attachment') {
-                  isImage = true;
-                  // Fetch encrypted blob from server
-                  const apiBase = activeServerUrlRef.current || (import.meta.env.VITE_SERVER_URL || '');
-                  const res = await fetch(`${apiBase}/api/attachments/${msgObj.attachmentId}`, {
-                    headers: {
-                      'x-room-name': room,
-                      'x-auth-hash': authHash || ''
-                    }
-                  });
-                  if (!res.ok) throw new Error("Download failed");
-                  const encryptedBlob = await res.blob();
-                  
-                  // Decrypt attachment
-                  const decryptedBlob = await decryptAttachment(encryptedBlob, msgObj.attachmentKey, msgObj.iv);
-                  finalMessage = URL.createObjectURL(decryptedBlob);
-                }
-              } else {
-                finalMessage = decryptedJsonStr; // fallback for unstructured valid json?
-              }
-            } catch (jsonErr) {
-              // Legacy text message (fallback compatibility)
-              finalMessage = decryptedJsonStr;
-              if (finalMessage.startsWith('data:image/')) isImage = true;
-            }
+            decryptedStr = await decryptMessage(rawContent, finalEncryptionKey);
           } catch (err) {
-            finalMessage = "🔒 [Encrypted message - Key mismatch or malformed]";
+            addMessage({
+              id: payload.id,
+              text: "🔒 [Encrypted message - Key mismatch or malformed]",
+              position: 'left',
+              sender: payload.name,
+              timestamp: payload.timestamp,
+              isImage: false
+            });
+            return;
           }
+        } else {
+          addMessage({
+            id: payload.id,
+            text: "🔒 [Encrypted message - Encryption key missing]",
+            position: 'left',
+            sender: payload.name,
+            timestamp: payload.timestamp,
+            isImage: false
+          });
+          return;
+        }
+        
+        // Parse protocol JSON envelope
+        let finalMessage = decryptedStr;
+        try {
+          const msgObj = JSON.parse(decryptedStr);
+          if (msgObj && msgObj.version === 1) {
+            if (msgObj.type === 'text') {
+              finalMessage = msgObj.text;
+            } else if (msgObj.type === 'attachment') {
+              isImage = true;
+              const apiBase = activeServerUrlRef.current || (import.meta.env.VITE_API_URL || '');
+              const res = await fetch(`${apiBase}/api/attachments/${msgObj.attachmentId}`, {
+                headers: {
+                  'x-room-name': room,
+                  'x-auth-hash': authHash || ''
+                }
+              });
+              if (!res.ok) throw new Error("Download failed");
+              const encryptedBlob = await res.blob();
+              const decryptedBlob = await decryptAttachment(encryptedBlob, msgObj.attachmentKey, msgObj.iv);
+              finalMessage = URL.createObjectURL(decryptedBlob);
+            }
+          }
+        } catch (jsonErr) {
+          if (decryptedStr.startsWith('data:image/')) isImage = true;
         }
         
         addMessage({
@@ -276,7 +290,7 @@ export default function App() {
         addToast('Encrypting and uploading...', 'info');
         const { ciphertextBlob, attachmentKeyStr, ivStr } = await encryptAttachment(file);
         
-        const apiBase = activeServerUrlRef.current || (import.meta.env.VITE_SERVER_URL || '');
+        const apiBase = activeServerUrlRef.current || (import.meta.env.VITE_API_URL || '');
         const uploadRes = await fetch(`${apiBase}/api/attachments`, {
           method: 'POST',
           headers: { 

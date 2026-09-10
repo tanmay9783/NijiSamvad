@@ -1,11 +1,17 @@
 import React, { useState } from 'react';
-import { Shield, Server, Shuffle } from 'lucide-react';
+import { Shield, Server, Shuffle, Copy, Check } from 'lucide-react';
+import { generateSecureRoomSecret } from '../services/crypto';
 
 export default function JoinModal({ onJoin, isConnecting, connectionError }) {
   const [userName, setUserName] = useState('');
   const [roomName, setRoomName] = useState('');
-  const [password, setPassword] = useState('');
-  const [serverTarget, setServerTarget] = useState('local'); // local, remote, demo
+  const [roomSecret, setRoomSecret] = useState('');
+  const [copied, setCopied] = useState(false);
+  const [serverTarget, setServerTarget] = useState(() => (
+    typeof window !== 'undefined' && (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1')
+      ? 'local'
+      : 'remote'
+  )); // local, remote, demo
 
   const generateRoom = () => {
     const adjectives = ['swift', 'silent', 'secure', 'neon', 'cyber', 'crystal'];
@@ -14,19 +20,24 @@ export default function JoinModal({ onJoin, isConnecting, connectionError }) {
     setRoomName(`${random(adjectives)}-${random(nouns)}-${Math.floor(Math.random() * 9999)}`);
   };
 
-  const generatePassword = () => {
-    const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789!@#$%^&*';
-    let pswd = '';
-    for (let i = 0; i < 16; i++) {
-      pswd += chars.charAt(Math.floor(Math.random() * chars.length));
+  const handleGenerateSecret = () => {
+    const newSecret = generateSecureRoomSecret();
+    setRoomSecret(newSecret);
+    setCopied(false);
+  };
+
+  const handleCopySecret = () => {
+    if (roomSecret) {
+      navigator.clipboard.writeText(roomSecret);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
     }
-    setPassword(pswd);
   };
 
   const handleSubmit = (e) => {
     e.preventDefault();
-    if (userName && roomName) {
-      onJoin(userName, roomName, password, serverTarget);
+    if (userName && roomName && roomSecret) {
+      onJoin(userName, roomName, roomSecret, serverTarget);
     }
   };
 
@@ -75,15 +86,32 @@ export default function JoinModal({ onJoin, isConnecting, connectionError }) {
 
           <div className="input-group">
             <label>
-              E2EE Security Key (Optional)
-              <button type="button" onClick={generatePassword} className="btn-text btn-small"><Shuffle size={14}/> Generate</button>
+              Room Secret / E2EE Key (Required)
+              <span className="btn-group-inline">
+                <button type="button" onClick={handleGenerateSecret} className="btn-text btn-small"><Shuffle size={14}/> Generate Secret</button>
+                {roomSecret && (
+                  <button type="button" onClick={handleCopySecret} className="btn-text btn-small success-text">
+                    {copied ? <Check size={14} /> : <Copy size={14} />} {copied ? 'Copied' : 'Copy'}
+                  </button>
+                )}
+              </span>
             </label>
-            <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="Leave blank for unencrypted room" />
-            {password && <small className="helper-text success">Encryption enabled (AES-256)</small>}
+            <input 
+              type="password" 
+              value={roomSecret} 
+              onChange={(e) => setRoomSecret(e.target.value)} 
+              required 
+              placeholder="Enter or generate high-entropy room secret" 
+            />
+            {roomSecret ? (
+              <small className="helper-text success">🔒 High-Entropy E2EE Active (AES-256-GCM). Share secret with room participants.</small>
+            ) : (
+              <small className="helper-text warning">⚠️ Secret required. The public room name is NEVER used as the encryption secret.</small>
+            )}
           </div>
 
-          <button type="submit" className="btn join-btn" disabled={isConnecting}>
-            {isConnecting ? 'Connecting...' : 'Join Secure Room'}
+          <button type="submit" className="btn join-btn" disabled={isConnecting || !roomSecret}>
+            {isConnecting ? 'Connecting...' : 'Join Encrypted Room'}
           </button>
         </form>
       </div>

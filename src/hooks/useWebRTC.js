@@ -7,7 +7,7 @@ const ICE_SERVERS = {
   ]
 };
 
-export default function useWebRTC(socket, roomUsers, isCallActive) {
+export default function useWebRTC(socket, roomUsers, isCallActive, setIsCallActive) {
   const [localStream, setLocalStream] = useState(null);
   const [remoteStreams, setRemoteStreams] = useState({});
   const [mediaState, setMediaState] = useState({ audio: true, video: true });
@@ -15,6 +15,7 @@ export default function useWebRTC(socket, roomUsers, isCallActive) {
   const peersRef = useRef({});
   const localStreamRef = useRef(null);
   const roomUsersRef = useRef(roomUsers);
+  const candidateQueueRef = useRef({});
 
   useEffect(() => {
     roomUsersRef.current = roomUsers;
@@ -58,6 +59,7 @@ export default function useWebRTC(socket, roomUsers, isCallActive) {
       peersRef.current[id].close();
       delete peersRef.current[id];
     }
+    delete candidateQueueRef.current[id];
     setRemoteStreams(prev => {
       const newStreams = { ...prev };
       delete newStreams[id];
@@ -68,9 +70,14 @@ export default function useWebRTC(socket, roomUsers, isCallActive) {
   const createPeer = useCallback((targetSocketId, stream) => {
     const peer = new RTCPeerConnection(ICE_SERVERS);
     
-    // Add local tracks if available
-    if (stream) {
+    // Add local tracks if available, otherwise fallback to recvonly transceivers
+    if (stream && stream.getTracks().length > 0) {
       stream.getTracks().forEach(track => peer.addTrack(track, stream));
+    } else {
+      try {
+        peer.addTransceiver('audio', { direction: 'recvonly' });
+        peer.addTransceiver('video', { direction: 'recvonly' });
+      } catch (e) {}
     }
 
     // Handle ICE Candidates
@@ -85,10 +92,12 @@ export default function useWebRTC(socket, roomUsers, isCallActive) {
 
     // Handle incoming streams
     peer.ontrack = (event) => {
-      setRemoteStreams(prev => ({
-        ...prev,
-        [targetSocketId]: event.streams[0]
-      }));
+      if (event.streams && event.streams[0]) {
+        setRemoteStreams(prev => ({
+          ...prev,
+          [targetSocketId]: event.streams[0]
+        }));
+      }
     };
 
     // Handle Connection State
@@ -101,6 +110,21 @@ export default function useWebRTC(socket, roomUsers, isCallActive) {
     return peer;
   }, [socket, cleanupPeer]);
 
+  // Flush queued ICE candidates
+  const flushIceCandidates = useCallback(async (targetSocketId, peer) => {
+    const queue = candidateQueueRef.current[targetSocketId];
+    if (queue && queue.length > 0) {
+      for (const cand of queue) {
+        try {
+          await peer.addIceCandidate(new RTCIceCandidate(cand));
+        } catch (e) {
+          console.error("Error adding queued ICE candidate", e);
+        }
+      }
+      delete candidateQueueRef.current[targetSocketId];
+    }
+  }, []);
+
   // Handle Call Lifecycle and Dynamic Joins
   useEffect(() => {
     if (!isCallActive || !socket) return;
@@ -108,7 +132,6 @@ export default function useWebRTC(socket, roomUsers, isCallActive) {
     let isMounted = true;
 
     const initCall = async () => {
-      // Only start local stream if not already started
       if (!localStreamRef.current) {
         await startLocalStream();
       }
@@ -116,27 +139,24 @@ export default function useWebRTC(socket, roomUsers, isCallActive) {
 
       const activeIds = new Set(roomUsersRef.current.map(u => u.id));
 
-      // Create peers for new users and initiate offers deterministically
-      roomUsersRef.current.forEach(async (user) => {
+      // Initiate offers for peers
+      for (const user of roomUsersRef.current) {
         if (user.id !== socket.id && !peersRef.current[user.id]) {
           const peer = createPeer(user.id, localStreamRef.current);
           peersRef.current[user.id] = peer;
           
-          // Deterministic initiator: larger socket.id creates the offer
-          if (socket.id > user.id) {
-            try {
-              const offer = await peer.createOffer();
-              await peer.setLocalDescription(offer);
-              socket.emit('webrtc-offer', {
-                targetSocketId: user.id,
-                sdp: peer.localDescription
-              });
-            } catch (e) {
-              console.error("Error creating offer", e);
-            }
+          try {
+            const offer = await peer.createOffer();
+            await peer.setLocalDescription(offer);
+            socket.emit('webrtc-offer', {
+              targetSocketId: user.id,
+              sdp: peer.localDescription
+            });
+          } catch (e) {
+            console.error("Error creating offer", e);
           }
         }
-      });
+      }
 
       // Cleanup peers for users who left
       Object.keys(peersRef.current).forEach(id => {
@@ -149,8 +169,6 @@ export default function useWebRTC(socket, roomUsers, isCallActive) {
     initCall();
 
     return () => {
-      // We don't cleanup all peers on every dependency change, 
-      // but we do set isMounted to false to prevent late streams from applying
       isMounted = false;
     };
   }, [isCallActive, socket, roomUsers, createPeer, startLocalStream, cleanupPeer]);
@@ -165,23 +183,34 @@ export default function useWebRTC(socket, roomUsers, isCallActive) {
     }
   }, [isCallActive, cleanupPeer, stopLocalStream]);
 
-  // Handle Socket Signaling Events
+  // ALWAYS active Socket Signaling Events for incoming call offers/answers
   useEffect(() => {
-    if (!socket || !isCallActive) return;
+    if (!socket) return;
 
     const isValidSender = (id) => roomUsersRef.current.some(u => u.id === id);
 
     const handleOffer = async ({ sdp, callerSocketId }) => {
       if (!isValidSender(callerSocketId)) return;
 
+      if (setIsCallActive) {
+        setIsCallActive(true);
+      }
+
+      let currentStream = localStreamRef.current;
+      if (!currentStream) {
+        currentStream = await startLocalStream();
+      }
+
       let peer = peersRef.current[callerSocketId];
       if (!peer) {
-        peer = createPeer(callerSocketId, localStreamRef.current);
+        peer = createPeer(callerSocketId, currentStream);
         peersRef.current[callerSocketId] = peer;
       }
       
       try {
         await peer.setRemoteDescription(new RTCSessionDescription(sdp));
+        await flushIceCandidates(callerSocketId, peer);
+
         const answer = await peer.createAnswer();
         await peer.setLocalDescription(answer);
         socket.emit('webrtc-answer', {
@@ -199,6 +228,7 @@ export default function useWebRTC(socket, roomUsers, isCallActive) {
       if (peer) {
         try {
           await peer.setRemoteDescription(new RTCSessionDescription(sdp));
+          await flushIceCandidates(answererSocketId, peer);
         } catch (e) {
           console.error("Error handling answer", e);
         }
@@ -208,12 +238,17 @@ export default function useWebRTC(socket, roomUsers, isCallActive) {
     const handleIceCandidate = async ({ candidate, senderSocketId }) => {
       if (!isValidSender(senderSocketId)) return;
       const peer = peersRef.current[senderSocketId];
-      if (peer) {
+      if (peer && peer.remoteDescription) {
         try {
           await peer.addIceCandidate(new RTCIceCandidate(candidate));
         } catch (e) {
           console.error("Error adding ice candidate", e);
         }
+      } else {
+        if (!candidateQueueRef.current[senderSocketId]) {
+          candidateQueueRef.current[senderSocketId] = [];
+        }
+        candidateQueueRef.current[senderSocketId].push(candidate);
       }
     };
 
@@ -226,7 +261,7 @@ export default function useWebRTC(socket, roomUsers, isCallActive) {
       socket.off('webrtc-answer', handleAnswer);
       socket.off('webrtc-ice-candidate', handleIceCandidate);
     };
-  }, [socket, isCallActive, createPeer]);
+  }, [socket, createPeer, startLocalStream, flushIceCandidates, setIsCallActive]);
 
   const toggleAudio = () => {
     if (localStreamRef.current) {
@@ -256,3 +291,4 @@ export default function useWebRTC(socket, roomUsers, isCallActive) {
     toggleVideo
   };
 }
+

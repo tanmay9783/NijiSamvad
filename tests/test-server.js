@@ -1,10 +1,33 @@
 import { io } from 'socket.io-client';
 import { spawn } from 'child_process';
+import { generateSecureRoomSecret, deriveKeys, encryptMessage, decryptMessage } from '../src/services/crypto.js';
 
 const PORT = 5006; // Different port to avoid conflicts
 
 async function runServerTests() {
   console.log('Starting Server Security Tests...');
+
+  // Phase 10 / Final E2EE Room Secret Unit Tests
+  const secret1 = generateSecureRoomSecret();
+  const secret2 = generateSecureRoomSecret();
+  if (!secret1 || secret1.length !== 24 || secret1 === secret2) {
+    throw new Error('Room Secret generation failed entropy requirement');
+  }
+
+  const k1 = await deriveKeys(secret1, 'test-room');
+  const k2 = await deriveKeys(secret2, 'test-room');
+  if (k1.authHash === k2.authHash) {
+    throw new Error('Different secrets derived identical authHash');
+  }
+
+  const encryptedPayload = await encryptMessage('classified', k1.encryptionKey);
+  try {
+    await decryptMessage(encryptedPayload, k2.encryptionKey);
+    throw new Error('Decryption unexpectedly succeeded with wrong secret');
+  } catch (err) {
+    if (err.message === 'Decryption unexpectedly succeeded with wrong secret') throw err;
+  }
+  console.log('✅ E2EE Room Secret & Key Isolation Tests');
 
   const serverProcess = spawn('node', ['server/server.js'], {
     env: { ...process.env, PORT },
@@ -13,7 +36,7 @@ async function runServerTests() {
 
   await new Promise(resolve => setTimeout(resolve, 1500));
 
-  let testsPassed = 0;
+  let testsPassed = 1;
   let testsFailed = 0;
 
   const runTest = async (name, testFn) => {
