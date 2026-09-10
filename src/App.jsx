@@ -134,8 +134,8 @@ export default function App() {
     }
 
     const serverUrl = target === 'local' 
-      ? '/' 
-      : 'https://chatapp-9z5x.onrender.com';
+      ? 'http://localhost:5000' 
+      : (import.meta.env.VITE_SERVER_URL || window.location.origin);
     
     try {
       const newSocket = io(serverUrl, { 
@@ -257,6 +257,11 @@ export default function App() {
       const file = msgTextOrFile;
       localPreview = URL.createObjectURL(file);
       
+      if (file.size > 9.5 * 1024 * 1024) {
+        addToast('File too large. Maximum size is 9.5MB before encryption.', 'error');
+        return;
+      }
+
       if (!encryptionKey) {
         addToast('Cannot send attachments without an encryption key.', 'error');
         return;

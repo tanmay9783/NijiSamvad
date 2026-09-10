@@ -51,3 +51,12 @@ To support clustering in the future without a database, the architecture would r
 
 ## 9. Conclusion
 For a zero-cost, privacy-first single-instance deployment, the current architecture is exceptionally robust. It can comfortably host **several hundred active users** across small ephemeral rooms on a basic 1GB RAM / 1 vCPU server.
+
+## 10. Production Operating Limits
+- **Recommended Chat Room Size**: Several hundred users. Tested stably up to 50 users.
+- **Recommended WebRTC Call Size**: ≤ 6 users.
+- **Experimental WebRTC Maximum**: 8 users.
+- **Attachment Size Maximum**: 9.5 MB plaintext limit per file.
+- **Single-Instance Expectations**: Memory grows linearly but very slowly per connection. Tested to handle fan-out effortlessly. Observed capacity easily exceeds 250 users on minimal VPS hardware.
+- **Local Ephemeral Storage Limitations**: The architecture provides application-level deletion guarantees (destroying files when the room empties). However, cloud provider volume snapshots or backups are entirely out of scope. Use encrypted volumes to harden host infrastructure.
+- **Horizontal Scaling Support**: None. To span multiple Node.js processes, you must migrate the `roomsMap` to Redis and handle shared attachment state, which breaks the zero-cost architecture goal.

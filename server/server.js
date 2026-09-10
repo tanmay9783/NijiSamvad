@@ -6,6 +6,10 @@ import helmet from 'helmet';
 import crypto from 'crypto';
 import fs from 'fs';
 import path from 'path';
+import { fileURLToPath } from 'url';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 const app = express();
 
@@ -71,6 +75,16 @@ const attachmentStore = {
   }
 };
 
+// Startup Cleanup: Synchronously wipe uploads folder on boot
+const uploadsDir = path.join(__dirname, '..', 'uploads');
+try {
+  fs.rmSync(uploadsDir, { recursive: true, force: true });
+  fs.mkdirSync(uploadsDir, { recursive: true });
+  console.log('[Server] Startup: Wiped and recreated uploads directory.');
+} catch (err) {
+  console.error('[Server] Failed to clean uploads directory on startup:', err);
+}
+
 const isProduction = process.env.NODE_ENV === 'production';
 
 app.use(helmet({
@@ -94,6 +108,11 @@ const allowedOrigin = process.env.CLIENT_ORIGIN || "http://localhost:5173";
 app.use(cors({ origin: allowedOrigin, credentials: true }));
 app.use(express.json({ limit: '1mb' }));
 app.use('/api/attachments', express.raw({ type: 'application/octet-stream', limit: '10mb' }));
+
+if (isProduction) {
+  const distPath = path.join(__dirname, '..', 'dist');
+  app.use(express.static(distPath));
+}
 
 const httpServer = createServer(app);
 const io = new Server(httpServer, {
@@ -217,7 +236,7 @@ async function destroyRoomIfEmpty(roomName) {
 
 // HTTP Endpoints
 app.get('/health', (req, res) => {
-  res.status(200).json({ status: 'healthy', timestamp: new Date().toISOString() });
+  res.status(200).json({ status: 'alive', uptime: process.uptime() });
 });
 
 app.get('/api/stats', (req, res) => {
@@ -498,6 +517,39 @@ io.on('connection', (socket) => {
 });
 
 const PORT = process.env.PORT || 5000;
-httpServer.listen(PORT, () => {
+const serverInstance = httpServer.listen(PORT, () => {
   console.log(`[Server] Chat backend running on port ${PORT}`);
 });
+
+// Graceful Shutdown
+function gracefulShutdown(signal) {
+  console.log(`\n[Server] Received ${signal}. Starting graceful shutdown...`);
+  
+  // 1. Stop Socket.IO
+  io.close(() => {
+    console.log('[Server] Socket.IO closed.');
+  });
+  
+  // 2. Clear Uploads (Ephemeral guarantee)
+  try {
+    fs.rmSync(uploadsDir, { recursive: true, force: true });
+    console.log('[Server] Ephemeral attachment storage wiped.');
+  } catch (err) {
+    console.error('[Server] Failed to wipe uploads on shutdown:', err);
+  }
+
+  // 3. Stop HTTP server
+  serverInstance.close(() => {
+    console.log('[Server] HTTP server closed. Exiting.');
+    process.exit(0);
+  });
+
+  // Failsafe
+  setTimeout(() => {
+    console.error('[Server] Forced shutdown due to timeout.');
+    process.exit(1);
+  }, 5000);
+}
+
+process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
+process.on('SIGINT', () => gracefulShutdown('SIGINT'));
