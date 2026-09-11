@@ -12,7 +12,8 @@
     "build": "vite build",
     "lint": "oxlint",
     "preview": "vite preview",
-    "test:load": "node tests/test-load.js"
+    "test:load": "node tests/test-load.js",
+    "test:e2e": "playwright test"
   },
   "dependencies": {
     "concurrently": "^10.0.5",
@@ -27,6 +28,7 @@
     "socket.io-client": "^4.8.3"
   },
   "devDependencies": {
+    "@playwright/test": "^1.63.0",
     "@types/react": "^19.2.18",
     "@types/react-dom": "^19.2.4",
     "@vitejs/plugin-react": "^6.1.0",

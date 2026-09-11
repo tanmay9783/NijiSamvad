@@ -216,7 +216,39 @@ async function run6UserSimulation() {
     await Promise.all(offerPromises);
     console.log(`✅ WebRTC Signaling Mesh successfully exchanged ${signalingCount} P2P offer/answer signals across 6 users!`);
 
+    // 8.5 Test Rate Limiting & Cross-Room Abuse
+    console.log('🛡️ Testing Security: Rate Limiting & Cross-Room Isolation...');
+    const evilSocket = createClient();
+    await new Promise((resolve) => evilSocket.on('connect', resolve));
+    evilSocket.emit('new-user-joined', { userName: 'Evil', roomName: 'evil-room', authHash: '' });
+    await new Promise((resolve) => { evilSocket.once('join-success', resolve); });
+    
+    // Cross-room abuse: Evil tries to send offer to Alice
+    let aliceReceivedEvilOffer = false;
+    sockets[0].once('webrtc-offer', () => { aliceReceivedEvilOffer = true; });
+    
+    evilSocket.emit('webrtc-offer', { targetSocketId: sockets[0].id, sdp: { type: 'offer', sdp: 'evil' } });
+    await new Promise(r => setTimeout(r, 500)); // wait to see if it arrives
+    if (aliceReceivedEvilOffer) throw new Error('Security Breach: Alice received cross-room WebRTC offer!');
+    console.log('✅ Cross-room signaling correctly rejected!');
+
+    // Rate Limiting Abuse (webrtc limit is 50 per 5s, penalty at 150)
+    let evilDisconnected = false;
+    evilSocket.on('disconnect', () => { evilDisconnected = true; });
+    
+    // Spam the server
+    for (let k = 0; k < 200; k++) {
+      evilSocket.emit('webrtc-offer', { targetSocketId: evilSocket.id, sdp: { type: 'offer', sdp: 'spam' } });
+    }
+    await new Promise(r => setTimeout(r, 500));
+    
+    if (!evilDisconnected) {
+      throw new Error('Security Breach: Evil socket was not disconnected after rate limit abuse!');
+    }
+    console.log('✅ Rate Limit strictly enforced: Spammer socket forcibly disconnected!');
+
     // 9. Test Disconnect & Room Cleanup
+
     console.log('🧹 Testing Disconnect & Room Destruction...');
     for (let i = 0; i < 5; i++) {
       sockets[i].disconnect();

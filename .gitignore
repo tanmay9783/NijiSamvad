@@ -22,4 +22,11 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
-.env\n.env.local\nuploads/
+.env
+.env.local
+uploads/
+
+# Playwright
+test-results/
+playwright-report/
+playwright/.cache/

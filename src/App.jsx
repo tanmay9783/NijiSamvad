@@ -38,6 +38,28 @@ export default function App() {
   // Demo Mode state
   const [isDemoMode, setIsDemoMode] = useState(false);
   const demoIntervalRef = useRef(null);
+  
+  // Blob URL tracking for memory leak prevention
+  const blobUrlsRef = useRef(new Set());
+
+  // Track blob urls when messages change
+  useEffect(() => {
+    messages.forEach(msg => {
+      if (msg.isImage && msg.text && msg.text.startsWith('blob:')) {
+        blobUrlsRef.current.add(msg.text);
+      }
+    });
+  }, [messages]);
+
+  // Cleanup ONLY on unmount
+  useEffect(() => {
+    return () => {
+      blobUrlsRef.current.forEach(url => {
+        try { URL.revokeObjectURL(url); } catch(e){}
+      });
+      blobUrlsRef.current.clear();
+    };
+  }, []);
 
   // WebRTC Call State Hook (Phase 11)
   const {
@@ -398,9 +420,11 @@ export default function App() {
 
     messages.forEach(msg => {
       if (msg.isImage && msg.text && msg.text.startsWith('blob:')) {
-        URL.revokeObjectURL(msg.text);
+        try { URL.revokeObjectURL(msg.text); } catch(e){}
       }
     });
+    blobUrlsRef.current.clear();
+    
     setMessages([]);
     setUsers([]);
     setEncryptionKey('');

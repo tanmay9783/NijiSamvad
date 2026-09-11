@@ -189,9 +189,9 @@ const RATE_LIMITS = {
 };
 
 const rateLimitStore = {
-  check(socketId, action) {
-    if (!rateLimitsMap.has(socketId)) rateLimitsMap.set(socketId, new Map());
-    const userLimits = rateLimitsMap.get(socketId);
+  check(socket, action) {
+    if (!rateLimitsMap.has(socket.id)) rateLimitsMap.set(socket.id, new Map());
+    const userLimits = rateLimitsMap.get(socket.id);
     if (!userLimits.has(action)) userLimits.set(action, { count: 0, windowStart: Date.now() });
     
     const state = userLimits.get(action);
@@ -202,6 +202,13 @@ const rateLimitStore = {
       return true;
     }
     state.count++;
+    
+    // Penalize heavy abuse by forcefully disconnecting
+    if (state.count > RATE_LIMITS[action] * 3) {
+      socket.disconnect(true);
+      return false;
+    }
+    
     return state.count <= RATE_LIMITS[action];
   },
   cleanup(socketId) {
@@ -213,6 +220,12 @@ const rateLimitStore = {
 setInterval(() => {
   attachmentStore.cleanupOrphans(roomStore.getAllRooms());
 }, 60 * 60 * 1000); // 1 hour
+
+// Basic HTML sanitization to prevent XSS in usernames and room names
+const sanitizeInput = (str) => {
+  if (typeof str !== 'string') return '';
+  return str.replace(/[<>]/g, '').trim();
+};
 
 // Config Limits
 const LIMITS = {
@@ -335,8 +348,12 @@ io.on('connection', (socket) => {
         return socket.emit('join-error', 'Unable to join room.');
       }
 
-      const cleanUserName = userName.trim();
-      const cleanRoomName = roomName.trim();
+      const cleanUserName = sanitizeInput(userName);
+      const cleanRoomName = sanitizeInput(roomName);
+      
+      if (cleanUserName.length === 0 || cleanRoomName.length === 0) {
+        return socket.emit('join-error', 'Invalid input detected.');
+      }
 
       roomStore.createRoom(cleanRoomName, authHash);
 
@@ -372,7 +389,7 @@ io.on('connection', (socket) => {
   socket.on('send', (messagePayload) => {
     try {
       if (!currentRoom) return;
-      if (!rateLimitStore.check(socket.id, 'send')) return;
+      if (!rateLimitStore.check(socket, 'send')) return;
       if (!messagePayload || typeof messagePayload !== 'object') return;
 
       const content = messagePayload.content;
@@ -392,7 +409,7 @@ io.on('connection', (socket) => {
   socket.on('typing', (isTyping) => {
     try {
       if (!currentRoom) return;
-      if (!rateLimitStore.check(socket.id, 'typing')) return;
+      if (!rateLimitStore.check(socket, 'typing')) return;
       if (typeof isTyping !== 'boolean') return;
 
       socket.to(currentRoom).emit('user-typing', { user: currentUser, isTyping });
@@ -402,7 +419,7 @@ io.on('connection', (socket) => {
   socket.on('message-reaction', (payload) => {
     try {
       if (!currentRoom) return;
-      if (!rateLimitStore.check(socket.id, 'reaction')) return;
+      if (!rateLimitStore.check(socket, 'reaction')) return;
       if (!payload || typeof payload !== 'object') return;
 
       const { messageId, emoji } = payload;
@@ -420,7 +437,7 @@ io.on('connection', (socket) => {
   socket.on('clear-chat', () => {
     try {
       if (!currentRoom) return;
-      if (!rateLimitStore.check(socket.id, 'send')) return; 
+      if (!rateLimitStore.check(socket, 'send')) return; 
       io.to(currentRoom).emit('chat-cleared', currentUser);
     } catch (e) {}
   });
@@ -432,7 +449,7 @@ io.on('connection', (socket) => {
 
   socket.on('webrtc-offer', (payload) => {
     try {
-      if (!rateLimitStore.check(socket.id, 'webrtc')) return;
+      if (!rateLimitStore.check(socket, 'webrtc')) return;
       if (!payload || typeof payload !== 'object') return;
       
       const { targetSocketId, sdp } = payload;
@@ -451,7 +468,7 @@ io.on('connection', (socket) => {
 
   socket.on('webrtc-answer', (payload) => {
     try {
-      if (!rateLimitStore.check(socket.id, 'webrtc')) return;
+      if (!rateLimitStore.check(socket, 'webrtc')) return;
       if (!payload || typeof payload !== 'object') return;
       
       const { targetSocketId, sdp } = payload;
@@ -470,7 +487,7 @@ io.on('connection', (socket) => {
 
   socket.on('webrtc-ice-candidate', (payload) => {
     try {
-      if (!rateLimitStore.check(socket.id, 'webrtc')) return;
+      if (!rateLimitStore.check(socket, 'webrtc')) return;
       if (!payload || typeof payload !== 'object') return;
       
       const { targetSocketId, candidate } = payload;
@@ -491,7 +508,7 @@ io.on('connection', (socket) => {
   socket.on('call-invite', () => {
     try {
       if (!currentRoom) return;
-      if (!rateLimitStore.check(socket.id, 'webrtc')) return;
+      if (!rateLimitStore.check(socket, 'webrtc')) return;
       socket.to(currentRoom).emit('call-invite', {
         callerSocketId: socket.id,
         callerName: currentUser
@@ -501,7 +518,7 @@ io.on('connection', (socket) => {
 
   socket.on('call-accept', (payload) => {
     try {
-      if (!rateLimitStore.check(socket.id, 'webrtc')) return;
+      if (!rateLimitStore.check(socket, 'webrtc')) return;
       if (!payload || typeof payload !== 'object') return;
       const { targetSocketId } = payload;
       if (typeof targetSocketId !== 'string') return;
@@ -516,7 +533,7 @@ io.on('connection', (socket) => {
 
   socket.on('call-decline', (payload) => {
     try {
-      if (!rateLimitStore.check(socket.id, 'webrtc')) return;
+      if (!rateLimitStore.check(socket, 'webrtc')) return;
       if (!payload || typeof payload !== 'object') return;
       const { targetSocketId } = payload;
       if (typeof targetSocketId !== 'string') return;
@@ -532,7 +549,7 @@ io.on('connection', (socket) => {
   socket.on('call-cancel', () => {
     try {
       if (!currentRoom) return;
-      if (!rateLimitStore.check(socket.id, 'webrtc')) return;
+      if (!rateLimitStore.check(socket, 'webrtc')) return;
       socket.to(currentRoom).emit('call-cancel', {
         callerSocketId: socket.id
       });
@@ -542,7 +559,7 @@ io.on('connection', (socket) => {
   socket.on('call-ended', () => {
     try {
       if (!currentRoom) return;
-      if (!rateLimitStore.check(socket.id, 'webrtc')) return;
+      if (!rateLimitStore.check(socket, 'webrtc')) return;
       socket.to(currentRoom).emit('call-ended', {
         socketId: socket.id,
         name: currentUser

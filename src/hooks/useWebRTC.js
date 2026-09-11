@@ -32,6 +32,28 @@ export default function useWebRTC(socket, roomUsers) {
     roomUsersRef.current = roomUsers;
   }, [roomUsers]);
 
+  // Top-level Unmount Cleanup (Memory Leak Fix)
+  useEffect(() => {
+    return () => {
+      // Intentionally using refs here to avoid stale closures during unmount
+      if (localStreamRef.current) {
+        localStreamRef.current.getTracks().forEach(track => track.stop());
+      }
+      if (displayTrackRef.current) {
+        displayTrackRef.current.stop();
+      }
+      Object.keys(peersRef.current).forEach(id => {
+        const peer = peersRef.current[id];
+        if (peer) {
+          peer.onicecandidate = null;
+          peer.ontrack = null;
+          peer.onconnectionstatechange = null;
+          peer.close();
+        }
+      });
+    };
+  }, []);
+
   // Initialize Local Camera/Microphone Stream
   const startLocalStream = useCallback(async () => {
     try {
@@ -50,10 +72,25 @@ export default function useWebRTC(socket, roomUsers) {
 
       return stream;
     } catch (err) {
-      console.warn("Error accessing media devices. Continuing as receive-only.", err);
-      return null;
+      console.warn("Error accessing camera/mic. Trying audio-only fallback...", err);
+      try {
+        const audioStream = await navigator.mediaDevices.getUserMedia({
+          video: false,
+          audio: true
+        });
+        setLocalStream(audioStream);
+        localStreamRef.current = audioStream;
+
+        audioStream.getAudioTracks().forEach(track => track.enabled = mediaState.audio);
+        setMediaState(prev => ({ ...prev, video: false })); // Force video to false since not available
+
+        return audioStream;
+      } catch (fallbackErr) {
+        console.warn("Failed all media access. Continuing as receive-only.", fallbackErr);
+        return null;
+      }
     }
-  }, [mediaState]);
+  }, [mediaState.audio, mediaState.video]);
 
   const stopLocalStream = useCallback(() => {
     if (displayTrackRef.current) {
