@@ -240,6 +240,35 @@ export default function CallInterface({
     return () => document.removeEventListener('fullscreenchange', handleFullscreenChange);
   }, []);
 
+  // Auto-PiP on Tab Switch
+  useEffect(() => {
+    const handleVisibilityChange = async () => {
+      try {
+        if (document.visibilityState === 'hidden' && document.pictureInPictureEnabled) {
+          if (!document.pictureInPictureElement && callContainerRef.current) {
+            const videoEls = callContainerRef.current.querySelectorAll('video');
+            if (videoEls.length > 0) {
+              await videoEls[0].requestPictureInPicture();
+              setIsPipActive(true);
+              videoEls[0].addEventListener('leavepictureinpicture', () => {
+                setIsPipActive(false);
+              }, { once: true });
+            }
+          }
+        } else if (document.visibilityState === 'visible') {
+          if (document.pictureInPictureElement) {
+            await document.exitPictureInPicture();
+            setIsPipActive(false);
+          }
+        }
+      } catch (err) {
+        console.warn("Auto-PiP on tab switch failed (often requires prior user gesture):", err);
+      }
+    };
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    return () => document.removeEventListener('visibilitychange', handleVisibilityChange);
+  }, []);
+
   // Handle Native Picture-in-Picture (PiP) API
   const togglePictureInPicture = async () => {
     try {
