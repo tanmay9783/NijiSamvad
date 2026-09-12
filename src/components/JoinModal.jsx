@@ -122,6 +122,10 @@ export default function JoinModal({ onJoin, isConnecting, connectionError }) {
             {isConnecting ? 'Connecting securely...' : 'Join Encrypted Room'}
           </button>
         </form>
+
+        <div style={{ textAlign: 'center', marginTop: '1.75rem', fontSize: '0.8rem', color: 'var(--text-muted)' }}>
+          Crafted with ❤️ by <strong style={{ color: 'var(--primary)' }}>Tanmay</strong>
+        </div>
       </div>
     </div>
   );

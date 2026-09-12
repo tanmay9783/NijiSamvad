@@ -1480,3 +1480,26 @@ body {
     scroll-behavior: auto !important;
   }
 }
+
+.app-footer {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  padding: 0.6rem 1rem;
+  font-size: 0.78rem;
+  color: var(--text-muted);
+  background: var(--surface);
+  border-top: 1px solid var(--border);
+  letter-spacing: 0.2px;
+}
+
+.app-footer strong {
+  color: var(--primary);
+  font-weight: 600;
+}
+
+.footer-dot {
+  opacity: 0.4;
+  font-size: 0.7rem;
+}

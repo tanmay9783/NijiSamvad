@@ -556,6 +556,12 @@ export default function App() {
               />
             </main>
           )}
+
+          <footer className="app-footer">
+            <span>Crafted with ❤️ by <strong>Tanmay</strong></span>
+            <span className="footer-dot">•</span>
+            <span>NijiSamvad E2EE Security v1.0</span>
+          </footer>
         </>
       )}
     </div>
