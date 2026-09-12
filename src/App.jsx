@@ -560,7 +560,7 @@ export default function App() {
           <footer className="app-footer">
             <span>Crafted with ❤️ by <strong>Tanmay</strong></span>
             <span className="footer-dot">•</span>
-            <span>NijiSamvad E2EE Security v1.0</span>
+            <span>NijiSamvad E2EE Security: Your chats are end to end encrypted and no one can read them except you and the person you are chatting with</span>
           </footer>
         </>
       )}

@@ -291,6 +291,7 @@ body {
   letter-spacing: -0.5px;
   background: linear-gradient(135deg, var(--primary), var(--accent));
   -webkit-background-clip: text;
+  background-clip: text;
   -webkit-text-fill-color: transparent;
 }
 
