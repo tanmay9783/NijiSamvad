@@ -23,7 +23,10 @@ export default function Header({
   return (
     <div className="header">
       <div className="header-left">
-        <h1 className="header-logo">NijiSamvad</h1>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem' }}>
+          <img src="/logo-icon.png" alt="NijiSamvad Logo" style={{ width: '28px', height: '28px', objectFit: 'contain' }} />
+          <h1 className="header-logo">NijiSamvad</h1>
+        </div>
         {isJoined && (
           <div className="room-info">
             <span className="room-name">#{roomName}</span>
