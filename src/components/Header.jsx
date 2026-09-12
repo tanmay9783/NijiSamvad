@@ -1,5 +1,5 @@
-import React from 'react';
-import { Moon, Sun, Shield, ShieldAlert, LogOut, Volume2, VolumeX, Users, PhoneCall, PhoneOff } from 'lucide-react';
+import React, { useState } from 'react';
+import { Moon, Sun, Shield, ShieldAlert, LogOut, Volume2, VolumeX, Users, PhoneCall, PhoneOff, MoreVertical } from 'lucide-react';
 
 export default function Header({ 
   theme, onToggleTheme, 
@@ -18,52 +18,59 @@ export default function Header({
   onEndCall
 }) {
   const isInCall = callState === 'outgoing' || callState === 'connecting' || callState === 'connected';
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
   return (
-    <div className="logo header">
-      <div className="logo-content">
-        <h1>SecureChat</h1>
+    <div className="header">
+      <div className="header-left">
+        <h1 className="header-logo">NijiSamvad</h1>
         {isJoined && (
           <div className="room-info">
-            <span className="room-badge">{roomName}</span>
+            <span className="room-name">#{roomName}</span>
             <button className="badge-btn member-count" onClick={onOpenDrawer} title="View Members">
-              <Users size={14} /> {memberCount}
+              <Users size={14} /> <span className="hide-on-mobile">{memberCount}</span>
             </button>
             <button className={`badge-btn security-badge ${isSecure ? 'secure' : 'insecure'}`} onClick={onOpenSecurity} title="Security Info">
               {isSecure ? <Shield size={14} /> : <ShieldAlert size={14} />}
-              {isSecure ? 'E2EE Active' : 'Unencrypted'}
+              <span className="hide-on-mobile">{isSecure ? 'End-to-end encrypted' : 'Unencrypted'}</span>
             </button>
           </div>
         )}
       </div>
       
       {isJoined && (
-        <div className="header-actions">
+        <div className="header-right">
           {/* Active Call indicator for late room joiners */}
           {activeCallRoom && !isInCall && callState === 'idle' && (
-            <button className="btn-text btn-small success-text animate-pulse" onClick={() => onAcceptCall(null)} title="Join Active Call">
-              <PhoneCall size={16} /> Join Call
+            <button className="btn-call-join" onClick={() => onAcceptCall(null)} title="Join Active Call">
+              <PhoneCall size={16} /> <span className="hide-on-mobile">Join Call</span>
             </button>
           )}
 
-          <button 
-            className={`icon-btn ${isInCall ? 'call-active' : ''}`} 
-            onClick={isInCall ? onEndCall : onStartCall} 
-            title={isInCall ? "Leave Call" : "Start Video Call"}
-          >
-            {isInCall ? <PhoneOff size={20} className="danger-text" /> : <PhoneCall size={20} className="success-text" />}
-          </button>
+          <div className={`header-actions ${mobileMenuOpen ? 'mobile-open' : ''}`}>
+            <button 
+              className={`icon-btn ${isInCall ? 'call-active' : ''}`} 
+              onClick={isInCall ? onEndCall : onStartCall} 
+              title={isInCall ? "Leave Call" : "Start Video Call"}
+            >
+              {isInCall ? <PhoneOff size={20} className="danger-text" /> : <PhoneCall size={20} className="success-text" />}
+            </button>
 
-          <button className="icon-btn" onClick={onToggleMute} title={isMuted ? "Unmute Notifications" : "Mute Notifications"}>
-            {isMuted ? <VolumeX size={20} /> : <Volume2 size={20} />}
-          </button>
+            <button className="icon-btn" onClick={onToggleMute} title={isMuted ? "Unmute Notifications" : "Mute Notifications"}>
+              {isMuted ? <VolumeX size={20} /> : <Volume2 size={20} />}
+            </button>
 
-          <button className="icon-btn" onClick={onToggleTheme} title="Toggle Theme">
-            {theme === 'dark' ? <Sun size={20} /> : <Moon size={20} />}
-          </button>
+            <button className="icon-btn" onClick={onToggleTheme} title="Toggle Theme">
+              {theme === 'dark' ? <Sun size={20} /> : <Moon size={20} />}
+            </button>
 
-          <button className="icon-btn danger" onClick={onLeaveChat} title="Leave Chat">
-            <LogOut size={20} />
+            <button className="icon-btn danger" onClick={onLeaveChat} title="Leave Chat">
+              <LogOut size={20} />
+            </button>
+          </div>
+          
+          <button className="icon-btn mobile-menu-toggle" onClick={() => setMobileMenuOpen(!mobileMenuOpen)}>
+            <MoreVertical size={20} />
           </button>
         </div>
       )}

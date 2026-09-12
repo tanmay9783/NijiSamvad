@@ -29,6 +29,7 @@ export default function App() {
   const [toasts, setToasts] = useState([]);
   const [isConnecting, setIsConnecting] = useState(false);
   const [connectionError, setConnectionError] = useState('');
+  const [replyingTo, setReplyingTo] = useState(null);
   
   // Modals & Drawers
   const [showDrawer, setShowDrawer] = useState(false);
@@ -173,7 +174,8 @@ export default function App() {
       ? 'http://localhost:5000' 
       : (import.meta.env.VITE_API_URL || window.location.origin);
     
-    activeServerUrlRef.current = serverUrl === window.location.origin ? '' : serverUrl;
+    const isLocalDev = serverUrl === window.location.origin || serverUrl === 'http://localhost:5000' || serverUrl === 'http://127.0.0.1:5000';
+    activeServerUrlRef.current = isLocalDev ? '' : serverUrl;
 
     try {
       const newSocket = io(serverUrl, { 
@@ -233,7 +235,7 @@ export default function App() {
           } catch (err) {
             addMessage({
               id: payload.id,
-              text: "🔒 [Encrypted message - Key mismatch or malformed]",
+              text: "🔒 Unable to decrypt this message. Your room secret may not match.",
               position: 'left',
               sender: payload.name,
               timestamp: payload.timestamp,
@@ -244,7 +246,7 @@ export default function App() {
         } else {
           addMessage({
             id: payload.id,
-            text: "🔒 [Encrypted message - Encryption key missing]",
+            text: "🔒 Unable to decrypt this message. No encryption key found.",
             position: 'left',
             sender: payload.name,
             timestamp: payload.timestamp,
@@ -279,13 +281,23 @@ export default function App() {
           if (decryptedStr.startsWith('data:image/')) isImage = true;
         }
         
+        let msgReplyTo = null;
+        let msgMentions = [];
+        try {
+          const parsed = JSON.parse(decryptedStr);
+          if (parsed && parsed.replyTo) msgReplyTo = parsed.replyTo;
+          if (parsed && parsed.mentions) msgMentions = parsed.mentions;
+        } catch (e) {}
+
         addMessage({
           id: payload.id,
           text: finalMessage,
           position: 'left',
           sender: payload.name,
           timestamp: payload.timestamp,
-          isImage
+          isImage,
+          replyTo: msgReplyTo,
+          mentions: msgMentions
         });
       });
 
@@ -300,7 +312,7 @@ export default function App() {
     }
   };
 
-  const handleSendMessage = async (msgTextOrFile, isImage = false) => {
+  const handleSendMessage = async (msgTextOrFile, isImage = false, replyTo = null, mentions = []) => {
     let payloadContent;
     let localPreview = null;
     
@@ -356,7 +368,9 @@ export default function App() {
       payloadContent = JSON.stringify({
         version: 1,
         type: 'text',
-        text: msgTextOrFile
+        text: msgTextOrFile,
+        replyTo,
+        mentions
       });
       localPreview = msgTextOrFile;
     }
@@ -379,8 +393,12 @@ export default function App() {
       position: 'right',
       sender: userName,
       timestamp: new Date().toISOString(),
-      isImage
+      isImage,
+      replyTo,
+      mentions
     });
+
+    setReplyingTo(null);
 
     if (!isMuted) playNotificationSound('send');
 
@@ -523,10 +541,20 @@ export default function App() {
           )}
 
           {(!isInCall || showChatInCall) && (
-            <>
-              <MessageList messages={messages} _currentUser={userName} />
-              <MessageInput onSendMessage={handleSendMessage} onTyping={handleTyping} />
-            </>
+            <main className="chat-main">
+              <MessageList 
+                messages={messages} 
+                _currentUser={userName} 
+                onReply={(msg) => setReplyingTo(msg)} 
+              />
+              <MessageInput 
+                onSendMessage={handleSendMessage} 
+                onTyping={handleTyping} 
+                replyingTo={replyingTo}
+                onCancelReply={() => setReplyingTo(null)}
+                users={users}
+              />
+            </main>
           )}
         </>
       )}

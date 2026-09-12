@@ -104,8 +104,25 @@ app.use(helmet({
   hsts: isProduction ? { maxAge: 31536000, includeSubDomains: true, preload: true } : false
 }));
 
-const allowedOrigin = process.env.CLIENT_ORIGIN || "http://localhost:5173";
-app.use(cors({ origin: allowedOrigin, credentials: true }));
+const allowedOrigins = isProduction
+  ? (process.env.CLIENT_ORIGIN ? [process.env.CLIENT_ORIGIN] : [])
+  : ['http://localhost:5173', 'http://127.0.0.1:5173', ...(process.env.CLIENT_ORIGIN ? [process.env.CLIENT_ORIGIN] : [])];
+
+const checkOrigin = (origin, callback) => {
+  if (!origin) {
+    return callback(null, true);
+  }
+  if (allowedOrigins.includes(origin) || (!isProduction && /^http:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(origin))) {
+    return callback(null, true);
+  }
+  return callback(new Error('Not allowed by CORS'));
+};
+
+app.use(cors({ 
+  origin: checkOrigin, 
+  credentials: true,
+  allowedHeaders: ['Content-Type', 'x-room-name', 'x-auth-hash']
+}));
 app.use(express.json({ limit: '1mb' }));
 app.use('/api/attachments', express.raw({ type: 'application/octet-stream', limit: '10mb' }));
 
@@ -117,7 +134,7 @@ if (isProduction) {
 const httpServer = createServer(app);
 const io = new Server(httpServer, {
   cors: {
-    origin: allowedOrigin,
+    origin: checkOrigin,
     methods: ["GET", "POST"]
   }
 });
@@ -156,10 +173,16 @@ const roomStore = {
   },
   validateCredential(roomName, authHash) {
     const room = roomsMap.get(roomName);
-    if (room && room.authHash) {
-      return room.authHash === authHash;
-    }
-    return true; // No auth hash required or new room
+    if (!room) return false;
+    if (!room.authHash) return true; // No auth hash required for room
+    if (typeof authHash !== 'string' || typeof room.authHash !== 'string') return false;
+    if (authHash.length === 0 || authHash.length > LIMITS.AUTHHASH) return false;
+    
+    // Constant-time comparison to prevent timing side-channel attacks
+    const bufA = Buffer.from(room.authHash);
+    const bufB = Buffer.from(authHash);
+    if (bufA.length !== bufB.length) return false;
+    return crypto.timingSafeEqual(bufA, bufB);
   },
   getUserCount() {
     return Array.from(roomsMap.values()).reduce((acc, room) => acc + room.users.size, 0);
@@ -253,6 +276,9 @@ app.get('/health', (req, res) => {
 });
 
 app.get('/api/stats', (req, res) => {
+  if (isProduction && process.env.ENABLE_LOAD_METRICS !== 'true') {
+    return res.status(404).json({ error: 'Not found' });
+  }
   res.status(200).json({
     rooms: roomStore.getRoomCount(),
     users: roomStore.getUserCount()

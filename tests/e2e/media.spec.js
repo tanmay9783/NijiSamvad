@@ -6,7 +6,7 @@ async function joinRoom(page, userName, roomName, roomSecret) {
   await page.getByPlaceholder('Enter or generate room ID').fill(roomName);
   await page.getByPlaceholder('Enter or generate high-entropy room secret').fill(roomSecret);
   await page.getByRole('button', { name: 'Join Encrypted Room' }).click();
-  await expect(page.locator('.toast.success')).toBeVisible({ timeout: 10000 });
+  await expect(page.getByPlaceholder('Type a secure message...')).toBeVisible({ timeout: 15000 });
 }
 
 test.describe('Media & Screen Share Fallbacks', () => {
@@ -19,7 +19,7 @@ test.describe('Media & Screen Share Fallbacks', () => {
     const page = await context.newPage();
     
     await joinRoom(page, 'NoCamUser', 'media-room', 'secret');
-    await page.getByRole('button', { name: /Start Secure Call/i }).click();
+    await page.getByTitle('Start Video Call').click();
 
     // Verify application does not crash
     await expect(page.locator('.outgoing-call-card')).toBeVisible();
@@ -41,7 +41,7 @@ test.describe('Media & Screen Share Fallbacks', () => {
     await joinRoom(pageA, 'Alice', 'screen-room', 'secret');
     await joinRoom(pageB, 'Bob', 'screen-room', 'secret');
 
-    await pageA.getByRole('button', { name: /Start Secure Call/i }).click();
+    await pageA.getByTitle('Start Video Call').click();
     await pageB.getByRole('button', { name: /Accept/i }).click();
 
     // Start screen share

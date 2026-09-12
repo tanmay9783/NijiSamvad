@@ -4,9 +4,9 @@
   "version": "1.0.0",
   "type": "module",
   "scripts": {
-    "dev": "concurrently \"npm run server\" \"vite\"",
-    "dev:client": "vite",
-    "dev:full": "concurrently \"npm run server\" \"vite\"",
+    "dev": "concurrently \"npm run server\" \"vite --host 127.0.0.1\"",
+    "dev:client": "vite --host 127.0.0.1",
+    "dev:full": "concurrently \"npm run server\" \"vite --host 127.0.0.1\"",
     "server": "node server/server.js",
     "start": "NODE_ENV=production node server/server.js",
     "build": "vite build",

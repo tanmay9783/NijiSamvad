@@ -3,11 +3,16 @@
 // Generate a cryptographically secure random room secret using Web Crypto
 export const generateSecureRoomSecret = () => {
   const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789!@#$%^&*';
-  const randomValues = new Uint32Array(24);
-  crypto.getRandomValues(randomValues);
+  const len = chars.length;
+  const maxValid = 4294967296 - (4294967296 % len);
   let secret = '';
-  for (let i = 0; i < 24; i++) {
-    secret += chars.charAt(randomValues[i] % chars.length);
+  const buffer = new Uint32Array(1);
+  while (secret.length < 24) {
+    crypto.getRandomValues(buffer);
+    const val = buffer[0];
+    if (val < maxValid) {
+      secret += chars.charAt(val % len);
+    }
   }
   return secret;
 };

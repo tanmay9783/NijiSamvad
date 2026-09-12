@@ -1,6 +1,8 @@
-# SecureChat
+# NijiSamvad
 
-A portfolio-grade, full-stack real-time communication application engineered with End-to-End Encryption (E2EE), secure room isolation, and a modern glassmorphic interface.
+A portfolio-grade, full-stack real-time communication application engineered with End-to-End Encryption (E2EE), secure room isolation, WebRTC peer-to-peer calling, and a modern glassmorphic interface.
+
+See [SECURITY.md](file:///home/tanmay/Videos/chat/SECURITY.md) for our detailed Security Policy, Cryptographic Specification, and Threat Model.
 
 ## 🚀 Features
 

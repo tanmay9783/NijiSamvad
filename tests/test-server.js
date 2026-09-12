@@ -458,15 +458,44 @@ async function runServerTests() {
 
   // HTTP SECURITY
   await runTest('HTTP - Security headers', async () => {
-    const res = await fetch(`http://localhost:${PORT}/api/stats`);
+    const res = await fetch(`http://localhost:${PORT}/health`);
     const csp = res.headers.get('content-security-policy');
-    const corsHeader = res.headers.get('access-control-allow-origin');
     
     if (res.status !== 200) throw new Error('API failed');
     if (!csp || !csp.includes("default-src 'none'")) throw new Error('Missing strict CSP');
-    if (!corsHeader) throw new Error('Missing CORS Header');
-    
-    console.log('✅ HTTP - Security headers & CSP configured');
+  });
+
+  // CORS ORIGIN VALIDATION TESTS
+  await runTest('CORS - Allowed local development origins succeed', async () => {
+    for (const origin of ['http://localhost:5173', 'http://127.0.0.1:5173']) {
+      const res = await fetch(`http://localhost:${PORT}/health`, {
+        method: 'OPTIONS',
+        headers: {
+          'Origin': origin,
+          'Access-Control-Request-Method': 'GET'
+        }
+      });
+      const allowedOrigin = res.headers.get('access-control-allow-origin');
+      if (allowedOrigin !== origin) {
+        throw new Error(`CORS failed to allow legitimate origin ${origin}`);
+      }
+    }
+  });
+
+  await runTest('CORS - Rejected unauthorized origins fail', async () => {
+    for (const origin of ['https://evil.example', 'https://attacker.example']) {
+      const res = await fetch(`http://localhost:${PORT}/health`, {
+        method: 'OPTIONS',
+        headers: {
+          'Origin': origin,
+          'Access-Control-Request-Method': 'GET'
+        }
+      });
+      const allowedOrigin = res.headers.get('access-control-allow-origin');
+      if (allowedOrigin === origin || allowedOrigin === '*') {
+        throw new Error(`CORS vulnerability: allowed unauthorized origin ${origin}`);
+      }
+    }
   });
 
   // RACE CONDITIONS
@@ -493,7 +522,108 @@ async function runServerTests() {
     });
   });
 
-  
+  // CROSS-ROOM & FORGED SOCKET ATTACKS
+  await runTest('Cross-room socket attack - call-invite cannot cross rooms', async () => {
+    const s1 = createClient();
+    const s2 = createClient();
+    await new Promise(r => s1.on('connect', r));
+    await new Promise(r => s2.on('connect', r));
+    await joinRoom(s1, 'Alice', 'cross-call-A');
+    await joinRoom(s2, 'Bob', 'cross-call-B');
+
+    return new Promise((resolve, reject) => {
+      s2.once('call-invite', () => reject(new Error('Cross-room call invitation allowed!')));
+      s1.emit('call-invite');
+      setTimeout(() => { s1.disconnect(); s2.disconnect(); resolve(); }, 400);
+    });
+  });
+
+  await runTest('Cross-room socket attack - forged target call-accept rejected', async () => {
+    const s1 = createClient();
+    const s2 = createClient();
+    await new Promise(r => s1.on('connect', r));
+    await new Promise(r => s2.on('connect', r));
+    await joinRoom(s1, 'Alice', 'cross-accept-A');
+    await joinRoom(s2, 'Bob', 'cross-accept-B');
+
+    return new Promise((resolve, reject) => {
+      s2.once('call-accept', () => reject(new Error('Cross-room call accept allowed!')));
+      s1.emit('call-accept', { targetSocketId: s2.id });
+      setTimeout(() => { s1.disconnect(); s2.disconnect(); resolve(); }, 400);
+    });
+  });
+
+  await runTest('Fuzzing & Malformed payloads - server rejects without crashing', async () => {
+    const s1 = createClient();
+    await new Promise(r => s1.on('connect', r));
+    await joinRoom(s1, 'Alice', 'fuzz-room');
+
+    const malformedEvents = [
+      ['send', null],
+      ['send', { content: 12345 }],
+      ['send', { content: { nested: 'object' } }],
+      ['typing', 'not-a-boolean'],
+      ['typing', { isTyping: true }],
+      ['message-reaction', { messageId: 123, emoji: '👍' }],
+      ['webrtc-offer', { targetSocketId: 123, sdp: 'invalid' }],
+      ['webrtc-answer', 'string-payload'],
+      ['call-accept', { targetSocketId: {} }],
+      ['call-decline', null]
+    ];
+
+    for (const [evt, payload] of malformedEvents) {
+      s1.emit(evt, payload);
+    }
+
+    await new Promise(r => setTimeout(r, 300));
+    s1.disconnect();
+  });
+
+  // PRODUCTION ENV SPECIFIC TESTS
+  await runTest('Production - /api/stats is hidden by default and CORS does not allow localhost automatically', async () => {
+    const prodPort = PORT + 10;
+    const prodProcess = spawn('node', ['server/server.js'], {
+      env: { ...process.env, PORT: prodPort, NODE_ENV: 'production', CLIENT_ORIGIN: 'https://my-app.example.com' },
+      stdio: 'pipe'
+    });
+    await new Promise(r => setTimeout(r, 1200));
+
+    try {
+      // 1. Check /api/stats returns 404 in production without ENABLE_LOAD_METRICS
+      const statsRes = await fetch(`http://localhost:${prodPort}/api/stats`);
+      if (statsRes.status !== 404) {
+        throw new Error(`/api/stats returned status ${statsRes.status} in production mode`);
+      }
+
+      // 2. Check CORS rejects http://localhost:5173 in production
+      const corsRes = await fetch(`http://localhost:${prodPort}/health`, {
+        method: 'OPTIONS',
+        headers: {
+          'Origin': 'http://localhost:5173',
+          'Access-Control-Request-Method': 'GET'
+        }
+      });
+      const allowedOrigin = corsRes.headers.get('access-control-allow-origin');
+      if (allowedOrigin === 'http://localhost:5173') {
+        throw new Error('CORS allowed localhost:5173 in production mode');
+      }
+
+      // 3. Check CORS allows configured CLIENT_ORIGIN
+      const allowedRes = await fetch(`http://localhost:${prodPort}/health`, {
+        method: 'OPTIONS',
+        headers: {
+          'Origin': 'https://my-app.example.com',
+          'Access-Control-Request-Method': 'GET'
+        }
+      });
+      if (allowedRes.headers.get('access-control-allow-origin') !== 'https://my-app.example.com') {
+        throw new Error('CORS failed to allow production CLIENT_ORIGIN');
+      }
+    } finally {
+      prodProcess.kill();
+    }
+  });
+
   serverProcess.kill();
 
   console.log(`\nTests completed: ${testsPassed} passed, ${testsFailed} failed.`);

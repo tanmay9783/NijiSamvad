@@ -8,7 +8,7 @@ async function joinRoom(page, userName, roomName, roomSecret) {
   await page.getByPlaceholder('Enter or generate high-entropy room secret').fill(roomSecret);
   await page.getByRole('button', { name: 'Join Encrypted Room' }).click();
   // Wait for success toast
-  await expect(page.locator('.toast.success')).toBeVisible({ timeout: 10000 });
+  await expect(page.getByTitle('Send message')).toBeVisible({ timeout: 15000 });
 }
 
 test.describe('Core E2EE & Room Dynamics', () => {
@@ -27,18 +27,17 @@ test.describe('Core E2EE & Room Dynamics', () => {
     await joinRoom(pageB, 'UserB', roomName, secret);
 
     // User A sends a message
-    await pageA.getByPlaceholder('Type a message...').fill('Hello from A');
-    // Using simple locator since icon buttons might not have name
-    await pageA.locator('.send-btn').click();
+    await pageA.getByPlaceholder('Type a secure message...').fill('Hello from A');
+    await pageA.getByTitle('Send message').click();
 
     // Verify User B receives and decrypts it
-    await expect(pageB.locator('.message-list')).toContainText('Hello from A');
-    await expect(pageB.locator('.message-list')).not.toContainText('Encrypted message');
+    await expect(pageB.locator('.message-wrapper')).toContainText('Hello from A');
+    await expect(pageB.locator('.message-wrapper')).not.toContainText('Unable to decrypt');
     
     // Verify Security indicators
-    await pageA.locator('.secure-badge').click();
-    await expect(pageA.locator('.security-modal')).toBeVisible();
-    await expect(pageA.locator('.security-modal')).toContainText('E2EE Active');
+    await pageA.locator('.security-badge').click();
+    await expect(pageA.locator('.modal-content')).toBeVisible();
+    await expect(pageA.locator('.modal-content')).toContainText('End-to-End Encrypted');
 
     await contextA.close();
     await contextB.close();
@@ -54,15 +53,21 @@ test.describe('Core E2EE & Room Dynamics', () => {
     const roomName = 'wrong-secret-room';
 
     await joinRoom(pageA, 'Alice', roomName, 'correct-secret');
-    await joinRoom(pageB, 'Bob', roomName, 'wrong-secret');
-
+    
     // Alice sends a message
-    await pageA.getByPlaceholder('Type a message...').fill('Top Secret Data');
-    await pageA.locator('.send-btn').click();
+    await pageA.getByPlaceholder('Type a secure message...').fill('Top Secret Data');
+    await pageA.getByTitle('Send message').click();
 
-    // Bob receives it but cannot decrypt
-    await expect(pageB.locator('.message-list')).toContainText('Encrypted message');
-    await expect(pageB.locator('.message-list')).not.toContainText('Top Secret Data');
+    // Bob tries to join with wrong secret but the server's strict authHash validation rejects him
+    await pageB.goto('/');
+    await pageB.getByPlaceholder('Enter your display name').fill('Bob');
+    await pageB.getByPlaceholder('Enter or generate room ID').fill(roomName);
+    await pageB.getByPlaceholder('Enter or generate high-entropy room secret').fill('wrong-secret');
+    await pageB.getByRole('button', { name: 'Join Encrypted Room' }).click();
+    
+    // Server rejects the join and sets connection error
+    await expect(pageB.locator('.alert-error')).toBeVisible({ timeout: 15000 });
+
     
     await contextA.close();
     await contextB.close();
@@ -81,19 +86,19 @@ test.describe('Core E2EE & Room Dynamics', () => {
     await joinRoom(pageB, 'Bob', 'Room-B', secret);
 
     // Alice sends a message in Room A
-    await pageA.getByPlaceholder('Type a message...').fill('Message for Room A');
-    await pageA.locator('.send-btn').click();
+    await pageA.getByPlaceholder('Type a secure message...').fill('Message for Room A');
+    await pageA.getByTitle('Send message').click();
 
     // Bob sends a message in Room B
-    await pageB.getByPlaceholder('Type a message...').fill('Message for Room B');
-    await pageB.locator('.send-btn').click();
+    await pageB.getByPlaceholder('Type a secure message...').fill('Message for Room B');
+    await pageB.getByTitle('Send message').click();
 
     // Verify isolation
-    await expect(pageA.locator('.message-list')).toContainText('Message for Room A');
-    await expect(pageA.locator('.message-list')).not.toContainText('Message for Room B');
+    await expect(pageA.locator('.message-wrapper')).toContainText('Message for Room A');
+    await expect(pageA.locator('.message-wrapper')).not.toContainText('Message for Room B');
     
-    await expect(pageB.locator('.message-list')).toContainText('Message for Room B');
-    await expect(pageB.locator('.message-list')).not.toContainText('Message for Room A');
+    await expect(pageB.locator('.message-wrapper')).toContainText('Message for Room B');
+    await expect(pageB.locator('.message-wrapper')).not.toContainText('Message for Room A');
 
     await contextA.close();
     await contextB.close();

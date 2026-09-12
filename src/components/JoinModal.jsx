@@ -43,20 +43,24 @@ export default function JoinModal({ onJoin, isConnecting, connectionError }) {
 
   return (
     <div className="modal">
-      <div className="modal-content">
-        <div className="modal-header">
-          <h2>SecureChat</h2>
-          <p>End-to-End Encrypted Real-Time Communication</p>
+      <div className="modal-content" style={{ padding: '2.5rem' }}>
+        <div className="modal-header" style={{ marginBottom: '2.5rem' }}>
+          <h2 style={{ fontSize: '1.75rem', letterSpacing: '-0.5px', marginBottom: '0.75rem' }}>NijiSamvad</h2>
+          <p style={{ color: 'var(--text-secondary)', fontSize: '0.9rem', lineHeight: '1.5' }}>
+            Private conversations. No permanent history.<br/>
+            All messages and calls are end-to-end encrypted.
+          </p>
         </div>
         
         {connectionError && (
-          <div className="alert alert-error">
+          <div className="alert alert-error" style={{ marginBottom: '1.5rem' }}>
             {connectionError}
           </div>
         )}
 
         <form onSubmit={handleSubmit}>
-          <div className="server-selector">
+          <div className="server-selector" style={{ display: 'none' }}>
+            {/* Kept functionally intact but hidden for premium UX, defaults to local/remote gracefully via state */}
             <label className={`server-option ${serverTarget === 'local' ? 'active' : ''}`}>
               <input type="radio" name="server" checked={serverTarget === 'local'} onChange={() => setServerTarget('local')} />
               <Server size={16} /> Local Server
@@ -73,7 +77,7 @@ export default function JoinModal({ onJoin, isConnecting, connectionError }) {
 
           <div className="input-group">
             <label>Your Name</label>
-            <input type="text" value={userName} onChange={(e) => setUserName(e.target.value)} required placeholder="Enter your display name" maxLength={30} />
+            <input type="text" value={userName} onChange={(e) => setUserName(e.target.value)} required placeholder="Enter your display name" maxLength={30} style={{ padding: '0.85rem 1rem' }} />
           </div>
 
           <div className="input-group">
@@ -81,14 +85,14 @@ export default function JoinModal({ onJoin, isConnecting, connectionError }) {
               Room ID 
               <button type="button" onClick={generateRoom} className="btn-text btn-small"><Shuffle size={14}/> Generate</button>
             </label>
-            <input type="text" value={roomName} onChange={(e) => setRoomName(e.target.value)} required placeholder="Enter or generate room ID" />
+            <input type="text" value={roomName} onChange={(e) => setRoomName(e.target.value)} required placeholder="Enter or generate room ID" style={{ padding: '0.85rem 1rem' }} />
           </div>
 
           <div className="input-group">
             <label>
-              Room Secret / E2EE Key (Required)
+              Room Secret 
               <span className="btn-group-inline">
-                <button type="button" onClick={handleGenerateSecret} className="btn-text btn-small"><Shuffle size={14}/> Generate Secret</button>
+                <button type="button" onClick={handleGenerateSecret} className="btn-text btn-small"><Shuffle size={14}/> Generate</button>
                 {roomSecret && (
                   <button type="button" onClick={handleCopySecret} className="btn-text btn-small success-text">
                     {copied ? <Check size={14} /> : <Copy size={14} />} {copied ? 'Copied' : 'Copy'}
@@ -96,22 +100,25 @@ export default function JoinModal({ onJoin, isConnecting, connectionError }) {
                 )}
               </span>
             </label>
-            <input 
-              type="password" 
-              value={roomSecret} 
-              onChange={(e) => setRoomSecret(e.target.value)} 
-              required 
-              placeholder="Enter or generate high-entropy room secret" 
-            />
+            <div style={{ position: 'relative' }}>
+              <input 
+                type="password" 
+                value={roomSecret} 
+                onChange={(e) => setRoomSecret(e.target.value)} 
+                required 
+                placeholder="Enter or generate high-entropy room secret" 
+                style={{ padding: '0.85rem 1rem', width: '100%' }}
+              />
+            </div>
             {roomSecret ? (
-              <small className="helper-text success">🔒 High-Entropy E2EE Active (AES-256-GCM). Share secret with room participants.</small>
+              <small className="helper-text success" style={{ marginTop: '0.25rem' }}>🔒 High-Entropy E2EE Active (AES-256-GCM).</small>
             ) : (
-              <small className="helper-text warning">⚠️ Secret required. The public room name is NEVER used as the encryption secret.</small>
+              <small className="helper-text" style={{ marginTop: '0.25rem' }}>A unique secret ensures your room remains perfectly private.</small>
             )}
           </div>
 
-          <button type="submit" className="btn join-btn" disabled={isConnecting || !roomSecret}>
-            {isConnecting ? 'Connecting...' : 'Join Encrypted Room'}
+          <button type="submit" className="btn join-btn" disabled={isConnecting || !roomSecret} style={{ marginTop: '1rem', padding: '1rem', fontSize: '1rem' }}>
+            {isConnecting ? 'Connecting securely...' : 'Join Encrypted Room'}
           </button>
         </form>
       </div>

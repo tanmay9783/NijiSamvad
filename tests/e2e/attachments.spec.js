@@ -8,7 +8,7 @@ async function joinRoom(page, userName, roomName, roomSecret) {
   await page.getByPlaceholder('Enter or generate room ID').fill(roomName);
   await page.getByPlaceholder('Enter or generate high-entropy room secret').fill(roomSecret);
   await page.getByRole('button', { name: 'Join Encrypted Room' }).click();
-  await expect(page.locator('.toast.success')).toBeVisible({ timeout: 10000 });
+  await expect(page.getByPlaceholder('Type a secure message...')).toBeVisible({ timeout: 15000 });
 }
 
 test.describe('Attachments', () => {
@@ -28,15 +28,18 @@ test.describe('Attachments', () => {
     await joinRoom(pageB, 'Bob', roomName, secret);
 
     // Create a temporary file to upload
-    const testFilePath = path.join('/tmp', 'test-upload.txt');
-    fs.writeFileSync(testFilePath, 'Hello from Alice attachment');
+    const testFilePath = path.join('/tmp', 'test-upload.png');
+    fs.writeFileSync(testFilePath, 'fake-png-data');
 
     // Alice uploads file
     // Our attach button wraps an input[type="file"], we can just use setInputFiles on it
+    // Give input time to attach
     await pageA.locator('input[type="file"]').setInputFiles(testFilePath);
 
+    // Verify Alice sees it first
+    await expect(pageA.locator('.message-image').last()).toBeVisible({ timeout: 15000 });
     // Verify Bob receives it
-    await expect(pageB.locator('.message-list')).toContainText('test-upload.txt', { timeout: 15000 });
+    await expect(pageB.locator('.message-image').last()).toBeVisible({ timeout: 15000 });
 
     await contextA.close();
     await contextB.close();

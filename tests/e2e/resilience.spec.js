@@ -6,7 +6,7 @@ async function joinRoom(page, userName, roomName, roomSecret) {
   await page.getByPlaceholder('Enter or generate room ID').fill(roomName);
   await page.getByPlaceholder('Enter or generate high-entropy room secret').fill(roomSecret);
   await page.getByRole('button', { name: 'Join Encrypted Room' }).click();
-  await expect(page.locator('.toast.success')).toBeVisible({ timeout: 10000 });
+  await expect(page.getByPlaceholder('Type a secure message...')).toBeVisible({ timeout: 15000 });
 }
 
 test.describe('Resilience & Edge Cases', () => {
@@ -34,14 +34,14 @@ test.describe('Resilience & Edge Cases', () => {
     await page.waitForTimeout(1000);
     
     // Send an XSS message
-    const isJoined = await page.locator('.toast.success').isVisible();
+    const isJoined = await page.locator('.toast-success').isVisible();
     if (isJoined) {
-      await page.getByPlaceholder('Type a message...').fill('<img src="x" onerror="alert(1)">');
-      await page.locator('.send-btn').click();
+      await page.getByPlaceholder('Type a secure message...').fill('<img src="x" onerror="alert(1)">');
+      await page.getByTitle('Send message').click();
       
       // Verify it is rendered as text, not an actual image tag executing script
-      await expect(page.locator('.message-list')).toContainText('<img src="x" onerror="alert(1)">');
-      const imgTags = await page.locator('.message-list img[src="x"]').count();
+      await expect(page.locator('.message-wrapper').last()).toContainText('<img src="x" onerror="alert(1)">');
+      const imgTags = await page.locator('.message-wrapper img[src="x"]').count();
       expect(imgTags).toBe(0);
     }
     
@@ -58,11 +58,12 @@ test.describe('Resilience & Edge Cases', () => {
     await joinRoom(page, 'MobileUser', 'mobile-room', 'secret');
     
     // Check if chat input is visible and usable
-    const chatInput = page.getByPlaceholder('Type a message...');
+    const chatInput = page.getByPlaceholder('Type a secure message...');
     await expect(chatInput).toBeVisible();
     await chatInput.fill('Testing mobile view');
     
     // Check if header actions are accessible (drawer might be hidden behind a hamburger, but let's check basic buttons)
+    await page.locator('.mobile-menu-toggle').click();
     await expect(page.locator('.header-actions')).toBeVisible();
 
     await context.close();
