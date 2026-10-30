@@ -28,3 +28,7 @@ uploads/
 test-results/
 playwright-report/
 playwright/.cache/
+
+# Private project documentation
+private-docs/
+
