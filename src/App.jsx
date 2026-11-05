@@ -28,8 +28,21 @@ export default function App() {
   const [users, setUsers] = useState([]);
   const [toasts, setToasts] = useState([]);
   const [isConnecting, setIsConnecting] = useState(false);
+  const [connectingStatus, setConnectingStatus] = useState('');
   const [connectionError, setConnectionError] = useState('');
   const [replyingTo, setReplyingTo] = useState(null);
+  
+  const wakeTimerRef = useRef(null);
+
+  // Pre-warm remote backend on page load to eliminate Render free tier cold-start delays
+  useEffect(() => {
+    const remoteUrl = import.meta.env.VITE_API_URL;
+    if (remoteUrl && typeof window !== 'undefined' && !window.location.hostname.includes('localhost') && !window.location.hostname.includes('127.0.0.1')) {
+      fetch(`${remoteUrl}/health`, { mode: 'cors' }).catch(() => {
+        // Silently catch - purpose is strictly to trigger Render's router to spin up the container
+      });
+    }
+  }, []);
   
   // Modals & Drawers
   const [showDrawer, setShowDrawer] = useState(false);
@@ -178,24 +191,50 @@ export default function App() {
     activeServerUrlRef.current = isLocalDev ? '' : serverUrl;
 
     try {
+      const isRemote = !isLocalDev;
+      let attempts = 0;
+      const MAX_ATTEMPTS = 3;
+
+      setConnectingStatus('Connecting securely...');
+      if (wakeTimerRef.current) clearTimeout(wakeTimerRef.current);
+      wakeTimerRef.current = setTimeout(() => {
+        setConnectingStatus('Waking up server (free tier spin-up may take ~30s)...');
+      }, 3500);
+
       const newSocket = io(serverUrl, { 
-        transports: ['websocket', 'polling'],
-        timeout: 10000,
-        reconnectionAttempts: 3
+        transports: ['polling', 'websocket'],
+        timeout: isRemote ? 35000 : 10000,
+        reconnection: true,
+        reconnectionAttempts: MAX_ATTEMPTS,
+        reconnectionDelay: 1500
       });
       
       newSocket.on('connect', () => {
+        if (wakeTimerRef.current) clearTimeout(wakeTimerRef.current);
+        setConnectingStatus('');
         setSocket(newSocket);
         newSocket.emit('new-user-joined', { userName: name, roomName: room, authHash });
       });
 
       newSocket.on('connect_error', (err) => {
-        setIsConnecting(false);
-        setConnectionError(`Connection failed: ${err.message}. Try another server.`);
-        newSocket.close();
+        attempts++;
+        if (attempts >= MAX_ATTEMPTS) {
+          if (wakeTimerRef.current) clearTimeout(wakeTimerRef.current);
+          setIsConnecting(false);
+          setConnectingStatus('');
+          const errorMsg = err.message === 'timeout'
+            ? 'Connection timed out while waking up the server. Please click Join to retry.'
+            : `Connection failed: ${err.message}. Try another server.`;
+          setConnectionError(errorMsg);
+          newSocket.close();
+        } else {
+          setConnectingStatus(`Waking up server (attempt ${attempts + 1}/${MAX_ATTEMPTS})...`);
+        }
       });
 
       newSocket.on('join-success', (data) => {
+        if (wakeTimerRef.current) clearTimeout(wakeTimerRef.current);
+        setConnectingStatus('');
         setIsJoined(true);
         setIsConnecting(false);
         addToast(`Joined ${data.room}`, 'success');
@@ -206,6 +245,8 @@ export default function App() {
       });
 
       newSocket.on('join-error', (err) => {
+        if (wakeTimerRef.current) clearTimeout(wakeTimerRef.current);
+        setConnectingStatus('');
         setIsConnecting(false);
         setConnectionError(err);
         newSocket.close();
@@ -307,6 +348,8 @@ export default function App() {
       });
 
     } catch {
+      if (wakeTimerRef.current) clearTimeout(wakeTimerRef.current);
+      setConnectingStatus('');
       setIsConnecting(false);
       setConnectionError('Failed to initialize connection.');
     }
@@ -432,6 +475,8 @@ export default function App() {
       socket.close();
       setSocket(null);
     }
+    if (wakeTimerRef.current) clearTimeout(wakeTimerRef.current);
+    setConnectingStatus('');
     setIsJoined(false);
     setIsDemoMode(false);
     endCall();
@@ -480,7 +525,12 @@ export default function App() {
       <Toast toasts={toasts} removeToast={removeToast} />
       
       {!isJoined ? (
-        <JoinModal onJoin={handleJoin} isConnecting={isConnecting} connectionError={connectionError} />
+        <JoinModal 
+          onJoin={handleJoin} 
+          isConnecting={isConnecting} 
+          connectionError={connectionError}
+          connectingStatus={connectingStatus}
+        />
       ) : (
         <>
           <Header 

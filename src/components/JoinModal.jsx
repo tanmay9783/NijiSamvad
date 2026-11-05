@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { Shield, Server, Shuffle, Copy, Check } from 'lucide-react';
 import { generateSecureRoomSecret } from '../services/crypto';
 
-export default function JoinModal({ onJoin, isConnecting, connectionError }) {
+export default function JoinModal({ onJoin, isConnecting, connectionError, connectingStatus }) {
   const [userName, setUserName] = useState('');
   const [roomName, setRoomName] = useState('');
   const [roomSecret, setRoomSecret] = useState('');
@@ -119,7 +119,7 @@ export default function JoinModal({ onJoin, isConnecting, connectionError }) {
           </div>
 
           <button type="submit" className="btn join-btn" disabled={isConnecting || !roomSecret} style={{ marginTop: '1rem', padding: '1rem', fontSize: '1rem' }}>
-            {isConnecting ? 'Connecting securely...' : 'Join Encrypted Room'}
+            {isConnecting ? (connectingStatus || 'Connecting securely...') : 'Join Encrypted Room'}
           </button>
         </form>
 
