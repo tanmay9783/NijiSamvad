@@ -24,11 +24,12 @@ const ICE_SERVERS = {
       username: 'openrelay',
       credential: 'openrelay'
     }
-  ]
+  ],
+  iceCandidatePoolSize: 10
 };
 
 export default function useWebRTC(socket, roomUsers) {
-  const [callState, setCallState] = useState('idle'); // idle, incoming, outgoing, connecting, connected, ended
+  const [callState, setCallState] = useState('idle'); // idle, incoming, outgoing, connecting, connected
   const [incomingCall, setIncomingCall] = useState(null); // { callerSocketId, callerName }
   const [activeCallRoom, setActiveCallRoom] = useState(false); // room has an active call
   const [localStream, setLocalStream] = useState(null);
@@ -45,19 +46,65 @@ export default function useWebRTC(socket, roomUsers) {
   const cameraVideoTrackRef = useRef(null);
   const blurCanvasRef = useRef(null);
   const maskCanvasRef = useRef(null);
+  const portraitCanvasRef = useRef(null);
   const blurVideoElementRef = useRef(null);
   const blurAnimationRef = useRef(null);
   const blurredVideoTrackRef = useRef(null);
   const roomUsersRef = useRef(roomUsers);
   const candidateQueueRef = useRef({});
+  const callStateRef = useRef(callState);
+
+  // Keep callStateRef synchronized
+  useEffect(() => {
+    callStateRef.current = callState;
+  }, [callState]);
+
+  // Stop local camera/mic stream completely
+  const stopLocalStream = useCallback(() => {
+    if (blurAnimationRef.current) {
+      cancelAnimationFrame(blurAnimationRef.current);
+      blurAnimationRef.current = null;
+    }
+    if (blurVideoElementRef.current) {
+      blurVideoElementRef.current.pause();
+      blurVideoElementRef.current.srcObject = null;
+      if (blurVideoElementRef.current.parentNode) {
+        blurVideoElementRef.current.parentNode.removeChild(blurVideoElementRef.current);
+      }
+      blurVideoElementRef.current = null;
+    }
+    if (blurredVideoTrackRef.current) {
+      blurredVideoTrackRef.current.stop();
+      blurredVideoTrackRef.current = null;
+    }
+    maskCanvasRef.current = null;
+    portraitCanvasRef.current = null;
+    setIsBackgroundBlurred(false);
+
+    if (displayTrackRef.current) {
+      displayTrackRef.current.stop();
+      displayTrackRef.current = null;
+    }
+    if (localStreamRef.current) {
+      localStreamRef.current.getTracks().forEach(track => {
+        try { track.stop(); } catch (e) {}
+      });
+      localStreamRef.current = null;
+      setLocalStream(null);
+    }
+    cameraVideoTrackRef.current = null;
+    setIsScreenSharing(false);
+  }, []);
 
   // Clean up a specific peer connection and its streams
   const cleanupPeer = useCallback((id) => {
     if (peersRef.current[id]) {
-      peersRef.current[id].onicecandidate = null;
-      peersRef.current[id].ontrack = null;
-      peersRef.current[id].onconnectionstatechange = null;
-      peersRef.current[id].close();
+      const p = peersRef.current[id];
+      p.onicecandidate = null;
+      p.ontrack = null;
+      p.onconnectionstatechange = null;
+      p.oniceconnectionstatechange = null;
+      try { p.close(); } catch (e) {}
       delete peersRef.current[id];
     }
     delete candidateQueueRef.current[id];
@@ -73,50 +120,22 @@ export default function useWebRTC(socket, roomUsers) {
     });
   }, []);
 
-  useEffect(() => {
-    roomUsersRef.current = roomUsers;
-    // Immediate departure detection: if any peer in call leaves roomUsers, clean them up immediately
-    if (Array.isArray(roomUsers)) {
-      const activeUserIds = new Set(roomUsers.map(u => u.id));
-      Object.keys(peersRef.current).forEach(peerId => {
-        if (!activeUserIds.has(peerId)) {
-          cleanupPeer(peerId);
-        }
-      });
-    }
-  }, [roomUsers, cleanupPeer]);
-
-  // Top-level Unmount Cleanup (Memory Leak Fix)
-  useEffect(() => {
-    return () => {
-      // Intentionally using refs here to avoid stale closures during unmount
-      if (localStreamRef.current) {
-        localStreamRef.current.getTracks().forEach(track => track.stop());
-      }
-      if (displayTrackRef.current) {
-        displayTrackRef.current.stop();
-      }
-      Object.keys(peersRef.current).forEach(id => {
-        const peer = peersRef.current[id];
-        if (peer) {
-          peer.onicecandidate = null;
-          peer.ontrack = null;
-          peer.onconnectionstatechange = null;
-          peer.close();
-        }
-      });
-    };
-  }, []);
-
   // Initialize Local Camera/Microphone Stream (Mobile + Desktop Optimized)
   const startLocalStream = useCallback(async () => {
-    // 1. Try with mobile front-camera and standard audio constraints
+    // 0. Reuse active local stream if tracks are still live (avoids mobile camera lock)
+    if (localStreamRef.current && localStreamRef.current.getTracks().some(t => t.readyState === 'live')) {
+      const videoTrack = localStreamRef.current.getVideoTracks()[0];
+      if (videoTrack) cameraVideoTrackRef.current = videoTrack;
+      return localStreamRef.current;
+    }
+
+    // 1. Mobile front-facing camera with ideal resolution and standard audio
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ 
         video: {
           facingMode: 'user',
-          width: { ideal: 640 },
-          height: { ideal: 480 }
+          width: { ideal: 1280 },
+          height: { ideal: 720 }
         }, 
         audio: {
           echoCancellation: true,
@@ -135,8 +154,8 @@ export default function useWebRTC(socket, roomUsers) {
 
       return stream;
     } catch (err) {
-      console.warn("Primary camera access failed, trying unconstrained video/audio fallback...", err);
-      // 2. Try simple unconstrained video + audio
+      console.warn("Primary camera access failed, trying unconstrained fallback...", err);
+      // 2. Unconstrained fallback (works on any camera, portrait or landscape)
       try {
         const stream = await navigator.mediaDevices.getUserMedia({ 
           video: true, 
@@ -175,56 +194,37 @@ export default function useWebRTC(socket, roomUsers) {
     }
   }, [mediaState.audio, mediaState.video, noiseSuppression]);
 
-  const stopLocalStream = useCallback(() => {
-    if (blurAnimationRef.current) {
-      cancelAnimationFrame(blurAnimationRef.current);
-      blurAnimationRef.current = null;
-    }
-    if (blurVideoElementRef.current) {
-      blurVideoElementRef.current.pause();
-      blurVideoElementRef.current.srcObject = null;
-      if (blurVideoElementRef.current.parentNode) {
-        blurVideoElementRef.current.parentNode.removeChild(blurVideoElementRef.current);
-      }
-      blurVideoElementRef.current = null;
-    }
-    if (blurredVideoTrackRef.current) {
-      blurredVideoTrackRef.current.stop();
-      blurredVideoTrackRef.current = null;
-    }
-    maskCanvasRef.current = null;
-    setIsBackgroundBlurred(false);
-
-    if (displayTrackRef.current) {
-      displayTrackRef.current.stop();
-      displayTrackRef.current = null;
-    }
-    if (localStreamRef.current) {
-      localStreamRef.current.getTracks().forEach(track => {
-        track.stop();
-      });
-      localStreamRef.current = null;
-      setLocalStream(null);
-    }
-    cameraVideoTrackRef.current = null;
-    setIsScreenSharing(false);
-  }, []);
-
+  // Cleanly create an RTCPeerConnection for a target peer
   const createPeer = useCallback((targetSocketId, stream) => {
+    // If an active peer connection exists, close it first before recreating
+    if (peersRef.current[targetSocketId]) {
+      try { peersRef.current[targetSocketId].close(); } catch (e) {}
+    }
+
     const peer = new RTCPeerConnection(ICE_SERVERS);
+    peersRef.current[targetSocketId] = peer;
     
     // Add local tracks if available
     if (stream && stream.getTracks().length > 0) {
-      stream.getTracks().forEach(track => peer.addTrack(track, stream));
+      stream.getTracks().forEach(track => {
+        try {
+          peer.addTrack(track, stream);
+        } catch (e) {
+          console.warn("addTrack warning:", e);
+        }
+      });
     }
 
-    // Ensure transceivers exist with sendrecv so mobile and desktop can always exchange both audio and video
-    const transceivers = peer.getTransceivers();
-    if (!transceivers.some(t => t.receiver && t.receiver.track && t.receiver.track.kind === 'audio')) {
-      try { peer.addTransceiver('audio', { direction: 'sendrecv' }); } catch (e) {}
+    // Only add recvonly transceivers if no sender exists for that media type
+    const senders = peer.getSenders();
+    const hasAudio = senders.some(s => s.track && s.track.kind === 'audio');
+    const hasVideo = senders.some(s => s.track && s.track.kind === 'video');
+
+    if (!hasAudio) {
+      try { peer.addTransceiver('audio', { direction: 'recvonly' }); } catch (e) {}
     }
-    if (!transceivers.some(t => t.receiver && t.receiver.track && t.receiver.track.kind === 'video')) {
-      try { peer.addTransceiver('video', { direction: 'sendrecv' }); } catch (e) {}
+    if (!hasVideo) {
+      try { peer.addTransceiver('video', { direction: 'recvonly' }); } catch (e) {}
     }
 
     // Handle ICE Candidates
@@ -232,8 +232,18 @@ export default function useWebRTC(socket, roomUsers) {
       if (event.candidate && socket) {
         socket.emit('webrtc-ice-candidate', {
           targetSocketId,
-          candidate: event.candidate
+          candidate: event.candidate.toJSON ? event.candidate.toJSON() : event.candidate
         });
+      }
+    };
+
+    // ICE Connection monitoring with auto restart
+    peer.oniceconnectionstatechange = () => {
+      if (peer.iceConnectionState === 'connected' || peer.iceConnectionState === 'completed') {
+        setCallState('connected');
+      } else if (peer.iceConnectionState === 'failed') {
+        console.warn("ICE connection failed, attempting restart...");
+        try { peer.restartIce(); } catch (e) {}
       }
     };
 
@@ -292,9 +302,9 @@ export default function useWebRTC(socket, roomUsers) {
     if (queue && queue.length > 0) {
       for (const cand of queue) {
         try {
-          await peer.addIceCandidate(new RTCIceCandidate(cand));
+          await peer.addIceCandidate(cand);
         } catch (e) {
-          console.error("Error adding queued ICE candidate", e);
+          console.error("Error flushing queued ICE candidate", e);
         }
       }
       delete candidateQueueRef.current[targetSocketId];
@@ -322,28 +332,17 @@ export default function useWebRTC(socket, roomUsers) {
 
     if (targetId) {
       socket.emit('call-accept', { targetSocketId: targetId });
-      
-      // Initiate offer if socket.id > targetId
-      if (socket.id > targetId && !peersRef.current[targetId]) {
-        const peer = createPeer(targetId, stream);
-        peersRef.current[targetId] = peer;
-        try {
-          const offer = await peer.createOffer();
-          await peer.setLocalDescription(offer);
-          socket.emit('webrtc-offer', { targetSocketId: targetId, sdp: peer.localDescription });
-        } catch (e) {
-          console.error("Error creating offer", e);
-        }
-      }
     } else {
       // Joining active room call: notify all peers in room
-      roomUsersRef.current.forEach(u => {
-        if (u.id !== socket.id) {
-          socket.emit('call-accept', { targetSocketId: u.id });
-        }
-      });
+      if (Array.isArray(roomUsersRef.current)) {
+        roomUsersRef.current.forEach(u => {
+          if (u.id !== socket.id) {
+            socket.emit('call-accept', { targetSocketId: u.id });
+          }
+        });
+      }
     }
-  }, [socket, incomingCall, startLocalStream, createPeer]);
+  }, [socket, incomingCall, startLocalStream]);
 
   // Decline Call Invitation
   const declineCall = useCallback(() => {
@@ -375,7 +374,226 @@ export default function useWebRTC(socket, roomUsers) {
     stopLocalStream();
     setCallState('idle');
     setActiveCallRoom(false);
+    setAcceptedPeers({});
   }, [socket, cleanupPeer, stopLocalStream]);
+
+  // Track roomUsers updates & clean up participants who left room
+  useEffect(() => {
+    roomUsersRef.current = roomUsers;
+    if (Array.isArray(roomUsers)) {
+      const activeUserIds = new Set(roomUsers.map(u => u.id));
+      Object.keys(peersRef.current).forEach(peerId => {
+        if (!activeUserIds.has(peerId)) {
+          cleanupPeer(peerId);
+        }
+      });
+      // If we are left alone in the call because the other peer left the room
+      if (Object.keys(peersRef.current).length === 0 && callState !== 'idle' && callState !== 'outgoing') {
+        stopLocalStream();
+        setCallState('idle');
+        setActiveCallRoom(false);
+        setAcceptedPeers({});
+      }
+    }
+  }, [roomUsers, cleanupPeer, stopLocalStream, callState]);
+
+  // Top-level Unmount Cleanup (Memory Leak Fix)
+  useEffect(() => {
+    return () => {
+      if (localStreamRef.current) {
+        localStreamRef.current.getTracks().forEach(track => track.stop());
+      }
+      if (displayTrackRef.current) {
+        displayTrackRef.current.stop();
+      }
+      Object.keys(peersRef.current).forEach(id => {
+        const peer = peersRef.current[id];
+        if (peer) {
+          peer.onicecandidate = null;
+          peer.ontrack = null;
+          peer.onconnectionstatechange = null;
+          peer.oniceconnectionstatechange = null;
+          try { peer.close(); } catch (e) {}
+        }
+      });
+    };
+  }, []);
+
+  // Socket Signaling Events for call invitations and WebRTC
+  useEffect(() => {
+    if (!socket) return;
+
+    const handleCallInvite = ({ callerSocketId, callerName }) => {
+      if (!callerSocketId || callerSocketId === socket.id) return;
+      if (callStateRef.current === 'idle') {
+        setIncomingCall({ callerSocketId, callerName });
+        setCallState('incoming');
+      }
+      setActiveCallRoom(true);
+    };
+
+    const handleCallAccept = async ({ accepterSocketId, accepterName }) => {
+      if (!accepterSocketId || accepterSocketId === socket.id) return;
+      setAcceptedPeers(prev => ({ ...prev, [accepterSocketId]: accepterName }));
+      setActiveCallRoom(true);
+      setCallState('connecting');
+
+      let currentStream = localStreamRef.current;
+      if (!currentStream) {
+        currentStream = await startLocalStream();
+      }
+
+      // Re-initialize peer if closed
+      if (peersRef.current[accepterSocketId] && peersRef.current[accepterSocketId].signalingState === 'closed') {
+        cleanupPeer(accepterSocketId);
+      }
+
+      const peer = createPeer(accepterSocketId, currentStream);
+      try {
+        const offer = await peer.createOffer();
+        await peer.setLocalDescription(offer);
+        socket.emit('webrtc-offer', {
+          targetSocketId: accepterSocketId,
+          sdp: peer.localDescription
+        });
+      } catch (e) {
+        console.error("Error creating WebRTC offer after accept:", e);
+      }
+    };
+
+    const handleCallDecline = ({ declinerSocketId, declinerName }) => {
+      if (!declinerSocketId || declinerSocketId === socket.id) return;
+      setAcceptedPeers(prev => {
+        const copy = { ...prev };
+        delete copy[declinerSocketId];
+        return copy;
+      });
+    };
+
+    const handleCallCancel = ({ callerSocketId }) => {
+      if (incomingCall && incomingCall.callerSocketId === callerSocketId) {
+        setIncomingCall(null);
+        setCallState('idle');
+      }
+    };
+
+    const handleCallEnded = ({ socketId }) => {
+      cleanupPeer(socketId);
+      // If no active peers remain in the call, cleanly transition back to idle
+      if (Object.keys(peersRef.current).length === 0) {
+        stopLocalStream();
+        setCallState('idle');
+        setActiveCallRoom(false);
+        setAcceptedPeers({});
+      }
+    };
+
+    const handleOffer = async ({ sdp, callerSocketId }) => {
+      if (!callerSocketId || callerSocketId === socket.id) return;
+      setActiveCallRoom(true);
+      setCallState('connected');
+
+      let currentStream = localStreamRef.current;
+      if (!currentStream) {
+        currentStream = await startLocalStream();
+      }
+
+      if (peersRef.current[callerSocketId] && peersRef.current[callerSocketId].signalingState === 'closed') {
+        cleanupPeer(callerSocketId);
+      }
+
+      let peer = peersRef.current[callerSocketId];
+
+      // Handle offer collision (glare) in mesh connection
+      const isOfferCollision = peer && (peer.signalingState !== 'stable');
+      const isPolite = socket.id < callerSocketId;
+
+      if (isOfferCollision) {
+        if (!isPolite) return; // Impolite peer ignores colliding offer
+        try {
+          await peer.setLocalDescription({ type: 'rollback' });
+        } catch (e) {}
+      }
+
+      if (!peer) {
+        peer = createPeer(callerSocketId, currentStream);
+      } else if (currentStream) {
+        // Ensure local tracks are attached to the existing peer connection so video is always sent
+        const senders = peer.getSenders();
+        currentStream.getTracks().forEach(track => {
+          if (!senders.some(s => s.track && s.track.id === track.id)) {
+            try { peer.addTrack(track, currentStream); } catch (e) {}
+          }
+        });
+      }
+      
+      try {
+        await peer.setRemoteDescription(new RTCSessionDescription(sdp));
+        await flushIceCandidates(callerSocketId, peer);
+
+        const answer = await peer.createAnswer();
+        await peer.setLocalDescription(answer);
+        socket.emit('webrtc-answer', {
+          targetSocketId: callerSocketId,
+          sdp: peer.localDescription
+        });
+        setCallState('connected');
+      } catch (e) {
+        console.error("Error handling offer:", e);
+      }
+    };
+
+    const handleAnswer = async ({ sdp, answererSocketId }) => {
+      if (!answererSocketId || answererSocketId === socket.id) return;
+      const peer = peersRef.current[answererSocketId];
+      if (peer) {
+        try {
+          await peer.setRemoteDescription(new RTCSessionDescription(sdp));
+          await flushIceCandidates(answererSocketId, peer);
+          setCallState('connected');
+        } catch (e) {
+          console.error("Error handling answer:", e);
+        }
+      }
+    };
+
+    const handleIceCandidate = async ({ candidate, senderSocketId }) => {
+      if (!senderSocketId || senderSocketId === socket.id || !candidate) return;
+      const peer = peersRef.current[senderSocketId];
+      if (peer && peer.remoteDescription && peer.remoteDescription.type) {
+        try {
+          await peer.addIceCandidate(candidate);
+        } catch (e) {
+          console.error("Error adding ice candidate:", e);
+        }
+      } else {
+        if (!candidateQueueRef.current[senderSocketId]) {
+          candidateQueueRef.current[senderSocketId] = [];
+        }
+        candidateQueueRef.current[senderSocketId].push(candidate);
+      }
+    };
+
+    socket.on('call-invite', handleCallInvite);
+    socket.on('call-accept', handleCallAccept);
+    socket.on('call-decline', handleCallDecline);
+    socket.on('call-cancel', handleCallCancel);
+    socket.on('call-ended', handleCallEnded);
+    socket.on('webrtc-offer', handleOffer);
+    socket.on('webrtc-answer', handleAnswer);
+    socket.on('webrtc-ice-candidate', handleIceCandidate);
+
+    return () => {
+      socket.off('call-invite', handleCallInvite);
+      socket.off('call-accept', handleCallAccept);
+      socket.off('call-decline', handleCallDecline);
+      socket.off('call-cancel', handleCallCancel);
+      socket.off('call-ended', handleCallEnded);
+      socket.off('webrtc-offer', handleOffer);
+      socket.off('webrtc-answer', handleAnswer);
+      socket.off('webrtc-ice-candidate', handleIceCandidate);
+    };
+  }, [socket, incomingCall, createPeer, startLocalStream, flushIceCandidates, cleanupPeer, stopLocalStream]);
 
   // Screen Sharing Implementation using RTCRtpSender.replaceTrack()
   const stopScreenShare = useCallback(async () => {
@@ -441,171 +659,6 @@ export default function useWebRTC(socket, roomUsers) {
     }
   }, [stopScreenShare]);
 
-  // ALWAYS active Socket Signaling Events for call invitations and WebRTC
-  useEffect(() => {
-    if (!socket) return;
-
-    const isValidSender = (id) => roomUsersRef.current.some(u => u.id === id);
-
-    const handleCallInvite = ({ callerSocketId, callerName }) => {
-      if (!isValidSender(callerSocketId)) return;
-      if (callState === 'idle') {
-        setIncomingCall({ callerSocketId, callerName });
-        setCallState('incoming');
-      }
-      setActiveCallRoom(true);
-    };
-
-    const handleCallAccept = async ({ accepterSocketId, accepterName }) => {
-      if (!isValidSender(accepterSocketId)) return;
-      setAcceptedPeers(prev => ({ ...prev, [accepterSocketId]: accepterName }));
-      setActiveCallRoom(true);
-
-      if (callState === 'outgoing' || callState === 'connecting' || callState === 'connected') {
-        setCallState('connecting');
-
-        let currentStream = localStreamRef.current;
-        if (!currentStream) {
-          currentStream = await startLocalStream();
-        }
-
-        // Initiate offer deterministically if socket.id > accepterSocketId
-        if (socket.id > accepterSocketId && !peersRef.current[accepterSocketId]) {
-          const peer = createPeer(accepterSocketId, currentStream);
-          peersRef.current[accepterSocketId] = peer;
-          try {
-            const offer = await peer.createOffer();
-            await peer.setLocalDescription(offer);
-            socket.emit('webrtc-offer', { targetSocketId: accepterSocketId, sdp: peer.localDescription });
-          } catch (e) {
-            console.error("Error creating offer after accept", e);
-          }
-        }
-      }
-    };
-
-    const handleCallDecline = ({ declinerSocketId, declinerName }) => {
-      if (!isValidSender(declinerSocketId)) return;
-      setAcceptedPeers(prev => {
-        const copy = { ...prev };
-        delete copy[declinerSocketId];
-        return copy;
-      });
-    };
-
-    const handleCallCancel = ({ callerSocketId }) => {
-      if (incomingCall && incomingCall.callerSocketId === callerSocketId) {
-        setIncomingCall(null);
-        setCallState('idle');
-      }
-    };
-
-    const handleCallEnded = ({ socketId }) => {
-      cleanupPeer(socketId);
-    };
-
-    const handleOffer = async ({ sdp, callerSocketId }) => {
-      if (!isValidSender(callerSocketId)) return;
-
-      let currentStream = localStreamRef.current;
-      if (!currentStream) {
-        currentStream = await startLocalStream();
-      }
-
-      let peer = peersRef.current[callerSocketId];
-
-      // Handle offer collision (glare) in mesh connection
-      const isOfferCollision = peer && (peer.signalingState !== 'stable');
-      const isPolite = socket.id < callerSocketId;
-
-      if (isOfferCollision) {
-        if (!isPolite) return; // Impolite peer ignores colliding offer
-        try {
-          await peer.setLocalDescription({ type: 'rollback' });
-        } catch (e) {}
-      }
-
-      if (!peer) {
-        peer = createPeer(callerSocketId, currentStream);
-        peersRef.current[callerSocketId] = peer;
-      } else if (currentStream) {
-        // Ensure local tracks are attached to the existing peer connection so video is always sent
-        const senders = peer.getSenders();
-        currentStream.getTracks().forEach(track => {
-          if (!senders.some(s => s.track && s.track.id === track.id)) {
-            try { peer.addTrack(track, currentStream); } catch (e) {}
-          }
-        });
-      }
-      
-      try {
-        await peer.setRemoteDescription(new RTCSessionDescription(sdp));
-        await flushIceCandidates(callerSocketId, peer);
-
-        const answer = await peer.createAnswer();
-        await peer.setLocalDescription(answer);
-        socket.emit('webrtc-answer', {
-          targetSocketId: callerSocketId,
-          sdp: peer.localDescription
-        });
-        setCallState('connected');
-      } catch (e) {
-        console.error("Error handling offer", e);
-      }
-    };
-
-    const handleAnswer = async ({ sdp, answererSocketId }) => {
-      if (!isValidSender(answererSocketId)) return;
-      const peer = peersRef.current[answererSocketId];
-      if (peer) {
-        try {
-          await peer.setRemoteDescription(new RTCSessionDescription(sdp));
-          await flushIceCandidates(answererSocketId, peer);
-          setCallState('connected');
-        } catch (e) {
-          console.error("Error handling answer", e);
-        }
-      }
-    };
-
-    const handleIceCandidate = async ({ candidate, senderSocketId }) => {
-      if (!isValidSender(senderSocketId)) return;
-      const peer = peersRef.current[senderSocketId];
-      if (peer && peer.remoteDescription) {
-        try {
-          await peer.addIceCandidate(new RTCIceCandidate(candidate));
-        } catch (e) {
-          console.error("Error adding ice candidate", e);
-        }
-      } else {
-        if (!candidateQueueRef.current[senderSocketId]) {
-          candidateQueueRef.current[senderSocketId] = [];
-        }
-        candidateQueueRef.current[senderSocketId].push(candidate);
-      }
-    };
-
-    socket.on('call-invite', handleCallInvite);
-    socket.on('call-accept', handleCallAccept);
-    socket.on('call-decline', handleCallDecline);
-    socket.on('call-cancel', handleCallCancel);
-    socket.on('call-ended', handleCallEnded);
-    socket.on('webrtc-offer', handleOffer);
-    socket.on('webrtc-answer', handleAnswer);
-    socket.on('webrtc-ice-candidate', handleIceCandidate);
-
-    return () => {
-      socket.off('call-invite', handleCallInvite);
-      socket.off('call-accept', handleCallAccept);
-      socket.off('call-decline', handleCallDecline);
-      socket.off('call-cancel', handleCallCancel);
-      socket.off('call-ended', handleCallEnded);
-      socket.off('webrtc-offer', handleOffer);
-      socket.off('webrtc-answer', handleAnswer);
-      socket.off('webrtc-ice-candidate', handleIceCandidate);
-    };
-  }, [socket, callState, incomingCall, createPeer, startLocalStream, flushIceCandidates, cleanupPeer]);
-
   const toggleAudio = () => {
     if (localStreamRef.current) {
       const audioTrack = localStreamRef.current.getAudioTracks()[0];
@@ -645,6 +698,7 @@ export default function useWebRTC(socket, roomUsers) {
     }
   }, [noiseSuppression]);
 
+  // Full Portrait Bokeh Background Blur (Natural Person Silhouette, NO circular cutout)
   const toggleBackgroundBlur = useCallback(async () => {
     if (!localStreamRef.current) return;
     const currentVideoTrack = cameraVideoTrackRef.current;
@@ -670,6 +724,7 @@ export default function useWebRTC(socket, roomUsers) {
         blurredVideoTrackRef.current = null;
       }
       maskCanvasRef.current = null;
+      portraitCanvasRef.current = null;
 
       // Restore local stream preview to original camera track
       if (localStreamRef.current) {
@@ -690,7 +745,7 @@ export default function useWebRTC(socket, roomUsers) {
         }
       }
     } else {
-      // Turn ON blur: try native platform capability or canvas portrait blur
+      // Turn ON blur: try native platform capability or natural silhouette bokeh
       try {
         if (currentVideoTrack.getCapabilities && currentVideoTrack.getCapabilities().backgroundBlur) {
           await currentVideoTrack.applyConstraints({ backgroundBlur: true });
@@ -732,41 +787,64 @@ export default function useWebRTC(socket, roomUsers) {
             canvas.height = hiddenVideo.videoHeight;
           }
 
-          // 1. Full-frame blurred background pass
+          const w = canvas.width;
+          const h = canvas.height;
+
+          // 1. Full-frame blurred background pass (Entire background room is smoothly blurred)
           ctx.save();
-          ctx.filter = 'blur(18px)';
-          ctx.drawImage(hiddenVideo, 0, 0, canvas.width, canvas.height);
+          ctx.filter = 'blur(16px)';
+          ctx.drawImage(hiddenVideo, 0, 0, w, h);
           ctx.restore();
 
-          // 2. Feathered sharp subject overlay (Natural depth-of-field bokeh, NO harsh circular cutout)
+          // 2. Feathered natural portrait silhouette (Head, shoulders, and torso remain sharp, NO circular cutout)
           if (!maskCanvasRef.current) {
             maskCanvasRef.current = document.createElement('canvas');
           }
           const mask = maskCanvasRef.current;
-          if (mask.width !== canvas.width || mask.height !== canvas.height) {
-            mask.width = canvas.width;
-            mask.height = canvas.height;
+          if (mask.width !== w || mask.height !== h) {
+            mask.width = w;
+            mask.height = h;
           }
           const mCtx = mask.getContext('2d');
-          mCtx.clearRect(0, 0, mask.width, mask.height);
-          
-          // Draw sharp video onto mask canvas
-          mCtx.drawImage(hiddenVideo, 0, 0, mask.width, mask.height);
-          
-          // Apply soft feathered gradient mask that smoothly fades into the blurred background
+          mCtx.clearRect(0, 0, w, h);
+
+          // Draw sharp camera frame onto mask canvas
+          mCtx.drawImage(hiddenVideo, 0, 0, w, h);
+
+          // Prepare smooth portrait silhouette mask
+          if (!portraitCanvasRef.current) {
+            portraitCanvasRef.current = document.createElement('canvas');
+          }
+          const pCanvas = portraitCanvasRef.current;
+          if (pCanvas.width !== w || pCanvas.height !== h) {
+            pCanvas.width = w;
+            pCanvas.height = h;
+          }
+          const pCtx = pCanvas.getContext('2d');
+          pCtx.clearRect(0, 0, w, h);
+
+          // Head & face oval
+          pCtx.fillStyle = '#ffffff';
+          pCtx.beginPath();
+          pCtx.ellipse(w * 0.50, h * 0.36, w * 0.23, h * 0.28, 0, 0, Math.PI * 2);
+          pCtx.fill();
+
+          // Torso & shoulders widening down to bottom of frame
+          pCtx.beginPath();
+          pCtx.moveTo(w * 0.22, h * 0.44);
+          pCtx.bezierCurveTo(w * 0.16, h * 0.60, w * 0.05, h * 0.85, 0, h);
+          pCtx.lineTo(w, h);
+          pCtx.bezierCurveTo(w * 0.95, h * 0.85, w * 0.84, h * 0.60, w * 0.78, h * 0.44);
+          pCtx.closePath();
+          pCtx.fill();
+
+          // Feather the silhouette edges softly into the blurred background
           mCtx.globalCompositeOperation = 'destination-in';
-          const grad = mCtx.createRadialGradient(
-            mask.width / 2, mask.height * 0.50, mask.width * 0.20,
-            mask.width / 2, mask.height * 0.50, mask.width * 0.60
-          );
-          grad.addColorStop(0, 'rgba(0,0,0,1)');
-          grad.addColorStop(0.5, 'rgba(0,0,0,0.85)');
-          grad.addColorStop(0.8, 'rgba(0,0,0,0.35)');
-          grad.addColorStop(1, 'rgba(0,0,0,0)');
-          mCtx.fillStyle = grad;
-          mCtx.fillRect(0, 0, mask.width, mask.height);
-          
-          // Composite the feathered sharp subject over the blurred background
+          mCtx.filter = 'blur(18px)';
+          mCtx.drawImage(pCanvas, 0, 0);
+          mCtx.filter = 'none';
+
+          // Composite the feathered sharp portrait over the full-frame blurred background
           ctx.drawImage(mask, 0, 0);
 
           blurAnimationRef.current = requestAnimationFrame(renderBlur);
@@ -777,7 +855,7 @@ export default function useWebRTC(socket, roomUsers) {
         const blurredTrack = canvasStream.getVideoTracks()[0];
         blurredVideoTrackRef.current = blurredTrack;
 
-        // Immediately update local preview to show blur locally!
+        // Immediately update local preview to show natural blur locally
         if (localStreamRef.current) {
           const audioTracks = localStreamRef.current.getAudioTracks();
           const blurredStream = new MediaStream([...audioTracks, blurredTrack]);
@@ -828,4 +906,3 @@ export default function useWebRTC(socket, roomUsers) {
     toggleBackgroundBlur
   };
 }
-

@@ -96,6 +96,7 @@ export default function App() {
     remoteStreams,
     mediaState,
     isScreenSharing,
+    acceptedPeers,
     noiseSuppression,
     isBackgroundBlurred,
     startCall,
@@ -631,7 +632,7 @@ export default function App() {
 
           <IncomingCallModal 
             incomingCall={incomingCall}
-            onAccept={() => acceptCall()}
+            onAccept={() => acceptCall(incomingCall?.callerSocketId)}
             onDecline={declineCall}
           />
 
@@ -640,6 +641,9 @@ export default function App() {
               callState={callState}
               localStream={localStream}
               remoteStreams={remoteStreams}
+              acceptedPeers={acceptedPeers}
+              roomUsers={users}
+              currentUser={userName}
               mediaState={mediaState}
               isScreenSharing={isScreenSharing}
               isBackgroundBlurred={isBackgroundBlurred}

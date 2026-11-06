@@ -84,7 +84,7 @@ function useAudioVolume(stream) {
   return isSpeaking;
 }
 
-// Single Participant Video Card Tile with Active Speaker Equalizer
+// Single Participant Video Card Tile with Active Speaker Equalizer & Camera-Off Avatar
 function ParticipantTile({ 
   id, 
   stream, 
@@ -98,12 +98,35 @@ function ParticipantTile({
   onSpeakingChange 
 }) {
   const isSpeaking = useAudioVolume(stream);
+  const [hasVideoTrack, setHasVideoTrack] = useState(false);
+
+  useEffect(() => {
+    if (!stream) {
+      setHasVideoTrack(false);
+      return;
+    }
+    const checkTracks = () => {
+      const vTracks = stream.getVideoTracks();
+      setHasVideoTrack(vTracks.length > 0 && vTracks[0].enabled && vTracks[0].readyState === 'live');
+    };
+    checkTracks();
+    stream.addEventListener('addtrack', checkTracks);
+    stream.addEventListener('removetrack', checkTracks);
+    return () => {
+      stream.removeEventListener('addtrack', checkTracks);
+      stream.removeEventListener('removetrack', checkTracks);
+    };
+  }, [stream]);
 
   useEffect(() => {
     if (onSpeakingChange) {
       onSpeakingChange(id, isSpeaking);
     }
   }, [id, isSpeaking, onSpeakingChange]);
+
+  const isVideoOff = isLocal 
+    ? (mediaState && !mediaState.video && !isScreenSharing)
+    : (!hasVideoTrack);
 
   return (
     <div 
@@ -112,6 +135,16 @@ function ParticipantTile({
       title="Double-click to pin / unpin video"
     >
       <VideoPlayer stream={stream} isLocal={isLocal} muted={isLocal} />
+
+      {/* Camera Off / Waiting Avatar Overlay */}
+      {isVideoOff && (
+        <div className="camera-off-overlay">
+          <div className="camera-off-avatar">
+            {label ? label.charAt(0).toUpperCase() : <User size={24} />}
+          </div>
+          <span className="camera-off-label">{isLocal ? 'Your Camera is Off' : `${label} (Camera Off)`}</span>
+        </div>
+      )}
       
       {/* Video Tile Label & Equalizer */}
       <div className="video-label">
@@ -130,7 +163,7 @@ function ParticipantTile({
         {isLocal && mediaState && !mediaState.audio && (
           <MicOff size={14} className="status-icon error" />
         )}
-        {isLocal && mediaState && !mediaState.video && !isScreenSharing && (
+        {isVideoOff && (
           <VideoOff size={14} className="status-icon error" />
         )}
       </div>
@@ -151,6 +184,9 @@ export default function CallInterface({
   callState,
   localStream, 
   remoteStreams, 
+  acceptedPeers = {},
+  roomUsers = [],
+  currentUser = '',
   mediaState, 
   isScreenSharing,
   isBackgroundBlurred,
@@ -176,6 +212,16 @@ export default function CallInterface({
 
   const remoteSocketIds = Object.keys(remoteStreams);
   const totalParticipants = remoteSocketIds.length + 1;
+
+  const getPeerLabel = useCallback((id) => {
+    if (id === 'local') return `You ${isScreenSharing ? '(Screen)' : ''}`;
+    if (acceptedPeers && acceptedPeers[id]) return acceptedPeers[id];
+    if (Array.isArray(roomUsers)) {
+      const match = roomUsers.find(u => u.id === id);
+      if (match && match.username) return match.username;
+    }
+    return `Peer ${id ? id.substring(0, 4) : ''}`;
+  }, [isScreenSharing, acceptedPeers, roomUsers]);
 
   // Active Speaker Handler Callback
   const handleSpeakingChange = useCallback((id, speaking) => {
@@ -374,9 +420,7 @@ export default function CallInterface({
               <div className="featured-participant-badge">
                 <Pin size={14} className="pinned-icon" />
                 <span>
-                  {activeFeaturedId === 'local' 
-                    ? `You ${isScreenSharing ? '(Screen)' : ''}` 
-                    : `Peer ${activeFeaturedId.substring(0, 4)}`}
+                  {getPeerLabel(activeFeaturedId)}
                 </span>
                 {isFeaturedSpeaking && (
                   <span className="speaking-tag">Speaking</span>
@@ -426,7 +470,7 @@ export default function CallInterface({
             id={id}
             stream={remoteStreams[id]}
             isLocal={false}
-            label={`Peer ${id.substring(0, 4)}`}
+            label={getPeerLabel(id)}
             isScreenSharing={false}
             mediaState={null}
             isFeatured={activeFeaturedId === id}
