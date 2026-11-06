@@ -28,6 +28,7 @@ export default function useWebRTC(socket, roomUsers) {
   const displayTrackRef = useRef(null);
   const cameraVideoTrackRef = useRef(null);
   const blurCanvasRef = useRef(null);
+  const blurVideoElementRef = useRef(null);
   const blurAnimationRef = useRef(null);
   const blurredVideoTrackRef = useRef(null);
   const roomUsersRef = useRef(roomUsers);
@@ -35,7 +36,16 @@ export default function useWebRTC(socket, roomUsers) {
 
   useEffect(() => {
     roomUsersRef.current = roomUsers;
-  }, [roomUsers]);
+    // Immediate departure detection: if any peer in call leaves roomUsers, clean them up immediately
+    if (Array.isArray(roomUsers)) {
+      const activeUserIds = new Set(roomUsers.map(u => u.id));
+      Object.keys(peersRef.current).forEach(peerId => {
+        if (!activeUserIds.has(peerId)) {
+          cleanupPeer(peerId);
+        }
+      });
+    }
+  }, [roomUsers, cleanupPeer]);
 
   // Top-level Unmount Cleanup (Memory Leak Fix)
   useEffect(() => {
@@ -110,6 +120,14 @@ export default function useWebRTC(socket, roomUsers) {
       cancelAnimationFrame(blurAnimationRef.current);
       blurAnimationRef.current = null;
     }
+    if (blurVideoElementRef.current) {
+      blurVideoElementRef.current.pause();
+      blurVideoElementRef.current.srcObject = null;
+      if (blurVideoElementRef.current.parentNode) {
+        blurVideoElementRef.current.parentNode.removeChild(blurVideoElementRef.current);
+      }
+      blurVideoElementRef.current = null;
+    }
     if (blurredVideoTrackRef.current) {
       blurredVideoTrackRef.current.stop();
       blurredVideoTrackRef.current = null;
@@ -175,20 +193,41 @@ export default function useWebRTC(socket, roomUsers) {
       }
     };
 
-    // Handle incoming streams
+    // Handle incoming streams with complete multi-track accumulation
     peer.ontrack = (event) => {
-      let incomingStream = (event.streams && event.streams[0]) ? event.streams[0] : null;
-      if (!incomingStream && event.track) {
-        incomingStream = new MediaStream([event.track]);
-      }
+      const incomingTrack = event.track;
+      if (!incomingTrack) return;
 
-      if (incomingStream) {
-        setRemoteStreams(prev => ({
+      setRemoteStreams(prev => {
+        const existing = prev[targetSocketId];
+        let allTracks = [];
+        if (existing) {
+          allTracks = existing.getTracks().filter(t => t.id !== incomingTrack.id && t.readyState === 'live');
+        } else if (event.streams && event.streams[0]) {
+          allTracks = event.streams[0].getTracks().filter(t => t.id !== incomingTrack.id && t.readyState === 'live');
+        }
+        allTracks.push(incomingTrack);
+
+        incomingTrack.onended = () => {
+          setRemoteStreams(curr => {
+            const s = curr[targetSocketId];
+            if (!s) return curr;
+            const remaining = s.getTracks().filter(t => t.id !== incomingTrack.id && t.readyState === 'live');
+            if (remaining.length === 0) {
+              const copy = { ...curr };
+              delete copy[targetSocketId];
+              return copy;
+            }
+            return { ...curr, [targetSocketId]: new MediaStream(remaining) };
+          });
+        };
+
+        return {
           ...prev,
-          [targetSocketId]: incomingStream
-        }));
-        setCallState('connected');
-      }
+          [targetSocketId]: new MediaStream(allTracks)
+        };
+      });
+      setCallState('connected');
     };
 
     // Handle Connection State
@@ -566,14 +605,32 @@ export default function useWebRTC(socket, roomUsers) {
         cancelAnimationFrame(blurAnimationRef.current);
         blurAnimationRef.current = null;
       }
+      if (blurVideoElementRef.current) {
+        blurVideoElementRef.current.pause();
+        blurVideoElementRef.current.srcObject = null;
+        if (blurVideoElementRef.current.parentNode) {
+          blurVideoElementRef.current.parentNode.removeChild(blurVideoElementRef.current);
+        }
+        blurVideoElementRef.current = null;
+      }
       if (blurredVideoTrackRef.current) {
         blurredVideoTrackRef.current.stop();
         blurredVideoTrackRef.current = null;
       }
+
+      // Restore local stream preview to original camera track
+      if (localStreamRef.current) {
+        const audioTracks = localStreamRef.current.getAudioTracks();
+        const restoredStream = new MediaStream([...audioTracks, currentVideoTrack]);
+        localStreamRef.current = restoredStream;
+        setLocalStream(restoredStream);
+      }
+
       for (const peerId of Object.keys(peersRef.current)) {
         const peer = peersRef.current[peerId];
         if (peer) {
-          const videoSender = peer.getSenders().find(s => s.track && s.track.kind === 'video');
+          const senders = peer.getSenders();
+          const videoSender = senders.find(s => s.track && s.track.kind === 'video') || senders.find(s => !s.track);
           if (videoSender) {
             try { await videoSender.replaceTrack(currentVideoTrack); } catch(e){}
           }
@@ -594,8 +651,18 @@ export default function useWebRTC(socket, roomUsers) {
         hiddenVideo.autoplay = true;
         hiddenVideo.playsInline = true;
         hiddenVideo.muted = true;
+        hiddenVideo.style.position = 'fixed';
+        hiddenVideo.style.left = '-9999px';
+        hiddenVideo.style.top = '-9999px';
+        hiddenVideo.style.width = '1px';
+        hiddenVideo.style.height = '1px';
+        hiddenVideo.style.opacity = '0';
+        hiddenVideo.style.pointerEvents = 'none';
+        document.body.appendChild(hiddenVideo);
+        blurVideoElementRef.current = hiddenVideo;
+
         hiddenVideo.srcObject = new MediaStream([currentVideoTrack]);
-        await hiddenVideo.play();
+        await hiddenVideo.play().catch(e => console.warn('Hidden video play error:', e));
 
         const canvas = document.createElement('canvas');
         canvas.width = 640;
@@ -604,20 +671,29 @@ export default function useWebRTC(socket, roomUsers) {
         blurCanvasRef.current = canvas;
 
         const renderBlur = () => {
-          if (!hiddenVideo.videoWidth) {
-            blurAnimationRef.current = requestAnimationFrame(renderBlur);
+          if (!cameraVideoTrackRef.current || cameraVideoTrackRef.current.readyState !== 'live') {
             return;
           }
-          // Blurred background pass
+          if (hiddenVideo.videoWidth && canvas.width !== hiddenVideo.videoWidth) {
+            canvas.width = hiddenVideo.videoWidth;
+            canvas.height = hiddenVideo.videoHeight;
+          }
+
+          // 1. Blurred background pass
           ctx.save();
           ctx.filter = 'blur(16px)';
           ctx.drawImage(hiddenVideo, 0, 0, canvas.width, canvas.height);
           ctx.restore();
 
-          // Centered subject focus pass
+          // 2. Focused subject pass
           ctx.save();
+          const centerX = canvas.width / 2;
+          const centerY = canvas.height * 0.48;
+          const radiusX = canvas.width * 0.33;
+          const radiusY = canvas.height * 0.44;
+
           ctx.beginPath();
-          ctx.ellipse(canvas.width / 2, canvas.height / 2, canvas.width * 0.35, canvas.height * 0.45, 0, 0, Math.PI * 2);
+          ctx.ellipse(centerX, centerY, radiusX, radiusY, 0, 0, Math.PI * 2);
           ctx.clip();
           ctx.drawImage(hiddenVideo, 0, 0, canvas.width, canvas.height);
           ctx.restore();
@@ -629,12 +705,23 @@ export default function useWebRTC(socket, roomUsers) {
         const canvasStream = canvas.captureStream(30);
         const blurredTrack = canvasStream.getVideoTracks()[0];
         blurredVideoTrackRef.current = blurredTrack;
+
+        // Immediately update local preview to show blur locally!
+        if (localStreamRef.current) {
+          const audioTracks = localStreamRef.current.getAudioTracks();
+          const blurredStream = new MediaStream([...audioTracks, blurredTrack]);
+          localStreamRef.current = blurredStream;
+          setLocalStream(blurredStream);
+        }
+
         setIsBackgroundBlurred(true);
 
+        // Replace track across all remote peer connections
         for (const peerId of Object.keys(peersRef.current)) {
           const peer = peersRef.current[peerId];
           if (peer) {
-            const videoSender = peer.getSenders().find(s => s.track && s.track.kind === 'video');
+            const senders = peer.getSenders();
+            const videoSender = senders.find(s => s.track && s.track.kind === 'video') || senders.find(s => !s.track);
             if (videoSender) {
               try { await videoSender.replaceTrack(blurredTrack); } catch(e){}
             }

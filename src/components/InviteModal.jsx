@@ -1,17 +1,22 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { X, Copy, Check, QrCode, Shield, Download } from 'lucide-react';
 import { generateQRCodeSVG } from '../services/qr';
 
 export default function InviteModal({ isOpen, onClose, roomName, roomSecret }) {
   const [copied, setCopied] = useState(false);
+  const [qrSvgString, setQrSvgString] = useState('');
 
-  if (!isOpen) return null;
-
-  const inviteUrl = typeof window !== 'undefined'
+  const inviteUrl = typeof window !== 'undefined' && roomName && roomSecret
     ? `${window.location.origin}/#room=${encodeURIComponent(roomName)}&secret=${encodeURIComponent(roomSecret)}`
     : '';
 
-  const qrSvgString = generateQRCodeSVG(inviteUrl, 200);
+  useEffect(() => {
+    if (inviteUrl) {
+      generateQRCodeSVG(inviteUrl, 200).then(svg => setQrSvgString(svg));
+    }
+  }, [inviteUrl]);
+
+  if (!isOpen) return null;
 
   const handleCopy = () => {
     if (inviteUrl) {

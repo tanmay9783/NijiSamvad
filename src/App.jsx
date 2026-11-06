@@ -37,6 +37,22 @@ export default function App() {
   
   const wakeTimerRef = useRef(null);
 
+  // Instant presence cleanup on tab close, back navigation or refresh
+  useEffect(() => {
+    const handleUnload = () => {
+      if (socket) {
+        socket.emit('leave-room');
+        socket.close();
+      }
+    };
+    window.addEventListener('beforeunload', handleUnload);
+    window.addEventListener('pagehide', handleUnload);
+    return () => {
+      window.removeEventListener('beforeunload', handleUnload);
+      window.removeEventListener('pagehide', handleUnload);
+    };
+  }, [socket]);
+
   // Pre-warm remote backend on page load to eliminate Render free tier cold-start delays
   useEffect(() => {
     const remoteUrl = import.meta.env.VITE_API_URL;

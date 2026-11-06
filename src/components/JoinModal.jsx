@@ -62,11 +62,11 @@ export default function JoinModal({ onJoin, isConnecting, connectionError, conne
 
   return (
     <div className="modal">
-      <div className="modal-content" style={{ padding: '2.5rem' }}>
-        <div className="modal-header" style={{ marginBottom: '2.5rem', textAlign: 'center' }}>
-          <img src="/logo-icon.png" alt="NijiSamvad Logo" style={{ width: '64px', height: '64px', margin: '0 auto 0.75rem auto', display: 'block', objectFit: 'contain' }} />
-          <h2 style={{ fontSize: '1.75rem', letterSpacing: '-0.5px', marginBottom: '0.75rem' }}>NijiSamvad</h2>
-          <p style={{ color: 'var(--text-secondary)', fontSize: '0.9rem', lineHeight: '1.5' }}>
+      <div className="modal-content join-modal-content">
+        <div className="modal-header" style={{ marginBottom: '1.75rem', textAlign: 'center' }}>
+          <img src="/logo-icon.png" alt="NijiSamvad Logo" style={{ width: '56px', height: '56px', margin: '0 auto 0.75rem auto', display: 'block', objectFit: 'contain' }} />
+          <h2 style={{ fontSize: '1.65rem', letterSpacing: '-0.5px', marginBottom: '0.5rem' }}>NijiSamvad</h2>
+          <p style={{ color: 'var(--text-secondary)', fontSize: '0.85rem', lineHeight: '1.4' }}>
             Private conversations. No permanent history.<br/>
             All messages and calls are end-to-end encrypted.
           </p>

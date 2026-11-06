@@ -133,6 +133,8 @@ if (isProduction) {
 
 const httpServer = createServer(app);
 const io = new Server(httpServer, {
+  pingInterval: 5000,
+  pingTimeout: 4000,
   cors: {
     origin: checkOrigin,
     methods: ["GET", "POST"]
@@ -208,7 +210,7 @@ const RATE_LIMITS = {
   send: 10,
   typing: 5,
   reaction: 10,
-  webrtc: 50
+  webrtc: 200
 };
 
 const rateLimitStore = {
