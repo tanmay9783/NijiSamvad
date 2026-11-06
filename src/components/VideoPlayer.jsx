@@ -66,11 +66,13 @@ export default function VideoPlayer({ stream, isLocal, muted }) {
   };
 
   return (
-    <div style={{ position: 'relative', width: '100%', height: '100%' }}>
+    <div style={{ position: 'absolute', inset: 0, width: '100%', height: '100%' }}>
       <video
         ref={videoRef}
         autoPlay
         playsInline
+        webkit-playsinline="true"
+        x5-playsinline="true"
         muted={isLocal || muted}
         className={`video-player ${isLocal ? 'local-video' : 'remote-video'}`}
       />

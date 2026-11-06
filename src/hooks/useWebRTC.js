@@ -7,7 +7,23 @@ const ICE_SERVERS = {
     { urls: 'stun:stun2.l.google.com:19302' },
     { urls: 'stun:stun3.l.google.com:19302' },
     { urls: 'stun:stun4.l.google.com:19302' },
-    { urls: 'stun:global.stun.twilio.com:3478' }
+    { urls: 'stun:global.stun.twilio.com:3478' },
+    { urls: 'stun:openrelay.metered.ca:80' },
+    {
+      urls: 'turn:openrelay.metered.ca:80',
+      username: 'openrelay',
+      credential: 'openrelay'
+    },
+    {
+      urls: 'turn:openrelay.metered.ca:443',
+      username: 'openrelay',
+      credential: 'openrelay'
+    },
+    {
+      urls: 'turn:openrelay.metered.ca:443?transport=tcp',
+      username: 'openrelay',
+      credential: 'openrelay'
+    }
   ]
 };
 
@@ -28,6 +44,7 @@ export default function useWebRTC(socket, roomUsers) {
   const displayTrackRef = useRef(null);
   const cameraVideoTrackRef = useRef(null);
   const blurCanvasRef = useRef(null);
+  const maskCanvasRef = useRef(null);
   const blurVideoElementRef = useRef(null);
   const blurAnimationRef = useRef(null);
   const blurredVideoTrackRef = useRef(null);
@@ -91,11 +108,16 @@ export default function useWebRTC(socket, roomUsers) {
     };
   }, []);
 
-  // Initialize Local Camera/Microphone Stream
+  // Initialize Local Camera/Microphone Stream (Mobile + Desktop Optimized)
   const startLocalStream = useCallback(async () => {
+    // 1. Try with mobile front-camera and standard audio constraints
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ 
-        video: true, 
+        video: {
+          facingMode: 'user',
+          width: { ideal: 640 },
+          height: { ideal: 480 }
+        }, 
         audio: {
           echoCancellation: true,
           noiseSuppression: noiseSuppression,
@@ -113,26 +135,42 @@ export default function useWebRTC(socket, roomUsers) {
 
       return stream;
     } catch (err) {
-      console.warn("Error accessing camera/mic. Trying audio-only fallback...", err);
+      console.warn("Primary camera access failed, trying unconstrained video/audio fallback...", err);
+      // 2. Try simple unconstrained video + audio
       try {
-        const audioStream = await navigator.mediaDevices.getUserMedia({
-          video: false,
-          audio: {
-            echoCancellation: true,
-            noiseSuppression: noiseSuppression,
-            autoGainControl: true
-          }
+        const stream = await navigator.mediaDevices.getUserMedia({ 
+          video: true, 
+          audio: true 
         });
-        setLocalStream(audioStream);
-        localStreamRef.current = audioStream;
+        setLocalStream(stream);
+        localStreamRef.current = stream;
 
-        audioStream.getAudioTracks().forEach(track => track.enabled = mediaState.audio);
-        setMediaState(prev => ({ ...prev, video: false })); // Force video to false since not available
+        const videoTrack = stream.getVideoTracks()[0];
+        if (videoTrack) cameraVideoTrackRef.current = videoTrack;
 
-        return audioStream;
-      } catch (fallbackErr) {
-        console.warn("Failed all media access. Continuing as receive-only.", fallbackErr);
-        return null;
+        stream.getAudioTracks().forEach(track => track.enabled = mediaState.audio);
+        stream.getVideoTracks().forEach(track => track.enabled = mediaState.video);
+
+        return stream;
+      } catch (err2) {
+        console.warn("Video access unavailable, trying audio-only fallback...", err2);
+        // 3. Audio-only fallback
+        try {
+          const audioStream = await navigator.mediaDevices.getUserMedia({
+            video: false,
+            audio: true
+          });
+          setLocalStream(audioStream);
+          localStreamRef.current = audioStream;
+
+          audioStream.getAudioTracks().forEach(track => track.enabled = mediaState.audio);
+          setMediaState(prev => ({ ...prev, video: false }));
+
+          return audioStream;
+        } catch (fallbackErr) {
+          console.warn("Failed all media access. Continuing as receive-only.", fallbackErr);
+          return null;
+        }
       }
     }
   }, [mediaState.audio, mediaState.video, noiseSuppression]);
@@ -154,6 +192,7 @@ export default function useWebRTC(socket, roomUsers) {
       blurredVideoTrackRef.current.stop();
       blurredVideoTrackRef.current = null;
     }
+    maskCanvasRef.current = null;
     setIsBackgroundBlurred(false);
 
     if (displayTrackRef.current) {
@@ -174,14 +213,18 @@ export default function useWebRTC(socket, roomUsers) {
   const createPeer = useCallback((targetSocketId, stream) => {
     const peer = new RTCPeerConnection(ICE_SERVERS);
     
-    // Add local tracks if available, otherwise fallback to recvonly transceivers
+    // Add local tracks if available
     if (stream && stream.getTracks().length > 0) {
       stream.getTracks().forEach(track => peer.addTrack(track, stream));
-    } else {
-      try {
-        peer.addTransceiver('audio', { direction: 'recvonly' });
-        peer.addTransceiver('video', { direction: 'recvonly' });
-      } catch (e) {}
+    }
+
+    // Ensure transceivers exist with sendrecv so mobile and desktop can always exchange both audio and video
+    const transceivers = peer.getTransceivers();
+    if (!transceivers.some(t => t.receiver && t.receiver.track && t.receiver.track.kind === 'audio')) {
+      try { peer.addTransceiver('audio', { direction: 'sendrecv' }); } catch (e) {}
+    }
+    if (!transceivers.some(t => t.receiver && t.receiver.track && t.receiver.track.kind === 'video')) {
+      try { peer.addTransceiver('video', { direction: 'sendrecv' }); } catch (e) {}
     }
 
     // Handle ICE Candidates
@@ -485,6 +528,14 @@ export default function useWebRTC(socket, roomUsers) {
       if (!peer) {
         peer = createPeer(callerSocketId, currentStream);
         peersRef.current[callerSocketId] = peer;
+      } else if (currentStream) {
+        // Ensure local tracks are attached to the existing peer connection so video is always sent
+        const senders = peer.getSenders();
+        currentStream.getTracks().forEach(track => {
+          if (!senders.some(s => s.track && s.track.id === track.id)) {
+            try { peer.addTrack(track, currentStream); } catch (e) {}
+          }
+        });
       }
       
       try {
@@ -618,6 +669,7 @@ export default function useWebRTC(socket, roomUsers) {
         blurredVideoTrackRef.current.stop();
         blurredVideoTrackRef.current = null;
       }
+      maskCanvasRef.current = null;
 
       // Restore local stream preview to original camera track
       if (localStreamRef.current) {
@@ -680,24 +732,42 @@ export default function useWebRTC(socket, roomUsers) {
             canvas.height = hiddenVideo.videoHeight;
           }
 
-          // 1. Blurred background pass
+          // 1. Full-frame blurred background pass
           ctx.save();
-          ctx.filter = 'blur(16px)';
+          ctx.filter = 'blur(18px)';
           ctx.drawImage(hiddenVideo, 0, 0, canvas.width, canvas.height);
           ctx.restore();
 
-          // 2. Focused subject pass
-          ctx.save();
-          const centerX = canvas.width / 2;
-          const centerY = canvas.height * 0.48;
-          const radiusX = canvas.width * 0.33;
-          const radiusY = canvas.height * 0.44;
-
-          ctx.beginPath();
-          ctx.ellipse(centerX, centerY, radiusX, radiusY, 0, 0, Math.PI * 2);
-          ctx.clip();
-          ctx.drawImage(hiddenVideo, 0, 0, canvas.width, canvas.height);
-          ctx.restore();
+          // 2. Feathered sharp subject overlay (Natural depth-of-field bokeh, NO harsh circular cutout)
+          if (!maskCanvasRef.current) {
+            maskCanvasRef.current = document.createElement('canvas');
+          }
+          const mask = maskCanvasRef.current;
+          if (mask.width !== canvas.width || mask.height !== canvas.height) {
+            mask.width = canvas.width;
+            mask.height = canvas.height;
+          }
+          const mCtx = mask.getContext('2d');
+          mCtx.clearRect(0, 0, mask.width, mask.height);
+          
+          // Draw sharp video onto mask canvas
+          mCtx.drawImage(hiddenVideo, 0, 0, mask.width, mask.height);
+          
+          // Apply soft feathered gradient mask that smoothly fades into the blurred background
+          mCtx.globalCompositeOperation = 'destination-in';
+          const grad = mCtx.createRadialGradient(
+            mask.width / 2, mask.height * 0.50, mask.width * 0.20,
+            mask.width / 2, mask.height * 0.50, mask.width * 0.60
+          );
+          grad.addColorStop(0, 'rgba(0,0,0,1)');
+          grad.addColorStop(0.5, 'rgba(0,0,0,0.85)');
+          grad.addColorStop(0.8, 'rgba(0,0,0,0.35)');
+          grad.addColorStop(1, 'rgba(0,0,0,0)');
+          mCtx.fillStyle = grad;
+          mCtx.fillRect(0, 0, mask.width, mask.height);
+          
+          // Composite the feathered sharp subject over the blurred background
+          ctx.drawImage(mask, 0, 0);
 
           blurAnimationRef.current = requestAnimationFrame(renderBlur);
         };

@@ -247,6 +247,13 @@ body {
   border-radius: 50%;
 }
 
+.btn-small {
+  width: auto !important;
+  padding: 0.4rem 0.8rem !important;
+  font-size: 0.82rem !important;
+  border-radius: 0.4rem !important;
+}
+
 .btn-text {
   background: transparent;
   border: none;

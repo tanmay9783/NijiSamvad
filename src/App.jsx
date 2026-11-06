@@ -52,16 +52,6 @@ export default function App() {
       window.removeEventListener('pagehide', handleUnload);
     };
   }, [socket]);
-
-  // Pre-warm remote backend on page load to eliminate Render free tier cold-start delays
-  useEffect(() => {
-    const remoteUrl = import.meta.env.VITE_API_URL;
-    if (remoteUrl && typeof window !== 'undefined' && !window.location.hostname.includes('localhost') && !window.location.hostname.includes('127.0.0.1')) {
-      fetch(`${remoteUrl}/health`, { mode: 'cors' }).catch(() => {
-        // Silently catch - purpose is strictly to trigger Render's router to spin up the container
-      });
-    }
-  }, []);
   
   // Modals, Drawers & Collaboration
   const [showDrawer, setShowDrawer] = useState(false);

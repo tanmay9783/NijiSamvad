@@ -42,9 +42,9 @@ export default function InviteModal({ isOpen, onClose, roomName, roomSecret }) {
     <div className="modal" role="dialog" aria-modal="true" style={{ zIndex: 1050 }}>
       <div className="modal-content" style={{ maxWidth: '440px', padding: '2rem', textAlign: 'center' }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.25rem' }}>
-          <h3 style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '1.25rem' }}>
-            <QrCode size={20} style={{ color: 'var(--primary)' }} />
-            Invite to #{roomName}
+          <h3 style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '1.25rem', margin: 0, overflow: 'hidden' }}>
+            <QrCode size={20} style={{ color: 'var(--primary)', flexShrink: 0 }} />
+            <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>Invite to #{roomName}</span>
           </h3>
           <button onClick={onClose} className="icon-btn" title="Close">
             <X size={18} />
@@ -120,12 +120,40 @@ export default function InviteModal({ isOpen, onClose, roomName, roomSecret }) {
           </span>
         </div>
 
-        <div style={{ display: 'flex', gap: '0.75rem' }}>
-          <button onClick={handleDownloadQR} className="btn" style={{ flex: 1, padding: '0.65rem 1rem', fontSize: '0.85rem', background: 'var(--surface-elevated)', border: '1px solid var(--border)', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.5rem' }}>
-            <Download size={15} />
+        {/* Action Buttons */}
+        <div style={{ display: 'flex', gap: '0.75rem', marginTop: '1.25rem' }}>
+          <button 
+            type="button"
+            onClick={handleDownloadQR} 
+            className="btn" 
+            style={{ 
+              flex: 1, 
+              padding: '0.75rem 1rem', 
+              fontSize: '0.85rem', 
+              background: 'var(--surface-elevated)', 
+              color: 'var(--text-primary)', 
+              border: '1px solid var(--border)', 
+              display: 'flex', 
+              alignItems: 'center', 
+              justifyContent: 'center', 
+              gap: '0.5rem',
+              boxShadow: 'none',
+              fontWeight: 600
+            }}
+          >
+            <Download size={16} />
             Save QR Image
           </button>
-          <button onClick={onClose} className="btn" style={{ padding: '0.65rem 1.25rem', fontSize: '0.85rem' }}>
+          <button 
+            type="button"
+            onClick={onClose} 
+            className="btn" 
+            style={{ 
+              flex: 1, 
+              padding: '0.75rem 1.25rem', 
+              fontSize: '0.85rem' 
+            }}
+          >
             Done
           </button>
         </div>
