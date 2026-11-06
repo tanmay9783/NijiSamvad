@@ -2,11 +2,130 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=5.0" />
+    
+    <!-- Primary SEO Title & Metadata -->
+    <title>NijiSamvad - Zero-Knowledge End-to-End Encrypted Private Chat & Video Calls</title>
+    <meta name="description" content="NijiSamvad is a free, zero-knowledge, end-to-end encrypted messaging and peer-to-peer video calling web app. No account, no database, no logs. Private conversations with AES-256-GCM encryption." />
+    <meta name="keywords" content="encrypted chat, private video call, zero knowledge messaging, end to end encrypted chat, e2ee video calling, ephemeral messaging, burn after reading, secure room, webrtc encrypted call, no signup private chat, NijiSamvad" />
+    <meta name="author" content="Tanmay" />
+    <meta name="robots" content="index, follow, max-snippet:-1, max-image-preview:large, max-video-preview:-1" />
+    <link rel="canonical" href="https://niji-samvad.vercel.app/" />
+
+    <!-- Favicon & Mobile Theme -->
     <link rel="icon" type="image/png" href="/favicon.png" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>NijiSamvad - End-to-End Encrypted Video & Chat</title>
+    <link rel="apple-touch-icon" href="/logo-icon.png" />
+    <link rel="manifest" href="/manifest.json" />
+    <meta name="theme-color" content="#ffd600" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+
+    <!-- Open Graph / Facebook / LinkedIn / WhatsApp -->
+    <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="NijiSamvad" />
+    <meta property="og:url" content="https://niji-samvad.vercel.app/" />
+    <meta property="og:title" content="NijiSamvad - Zero-Knowledge Private Chat & Video Calls" />
+    <meta property="og:description" content="Private conversations. No database. No permanent history. Pure peer-to-peer WebRTC video and AES-256-GCM encrypted instant messaging." />
+    <meta property="og:image" content="https://niji-samvad.vercel.app/logo.png" />
+    <meta property="og:image:alt" content="NijiSamvad Encrypted Chat & Video Calling" />
+    <meta property="og:locale" content="en_US" />
+
+    <!-- Twitter / X Cards -->
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="NijiSamvad - Zero-Knowledge Encrypted Chat & Video" />
+    <meta name="twitter:description" content="Free, secure, browser-based end-to-end encrypted messaging and HD video calls. No phone number or registration required." />
+    <meta name="twitter:image" content="https://niji-samvad.vercel.app/logo.png" />
+
+    <!-- JSON-LD Structured Data Schema for Google Rich Snippets -->
+    <script type="application/ld+json">
+    {
+      "@context": "https://schema.org",
+      "@graph": [
+        {
+          "@type": "WebApplication",
+          "@id": "https://niji-samvad.vercel.app/#webapp",
+          "name": "NijiSamvad",
+          "url": "https://niji-samvad.vercel.app/",
+          "applicationCategory": "CommunicationApplication",
+          "operatingSystem": "All modern browsers (Chrome, Safari, Firefox, Edge, Android, iOS)",
+          "offers": {
+            "@type": "Offer",
+            "price": "0",
+            "priceCurrency": "USD"
+          },
+          "description": "Zero-knowledge end-to-end encrypted messaging, peer-to-peer video calling, self-destructing messages, and collaborative live whiteboard.",
+          "featureList": [
+            "AES-256-GCM End-to-End Cryptography",
+            "Peer-to-Peer WebRTC Video Calls",
+            "Zero Database & Zero Server Logs",
+            "Self-Destructing Burn-After-Reading Messages",
+            "Interactive End-to-End Encrypted Whiteboard",
+            "One-Click Invite Links and QR Code Scanning",
+            "Background Blur and Active Noise Suppression"
+          ],
+          "creator": {
+            "@type": "Person",
+            "name": "Tanmay"
+          }
+        },
+        {
+          "@type": "WebSite",
+          "@id": "https://niji-samvad.vercel.app/#website",
+          "url": "https://niji-samvad.vercel.app/",
+          "name": "NijiSamvad",
+          "description": "Private, zero-knowledge conversations with AES-256-GCM encryption."
+        },
+        {
+          "@type": "FAQPage",
+          "mainEntity": [
+            {
+              "@type": "Question",
+              "name": "How does NijiSamvad protect privacy?",
+              "acceptedAnswer": {
+                "@type": "Answer",
+                "text": "NijiSamvad employs client-side AES-256-GCM encryption using keys derived via PBKDF2 (100,000 iterations). Keys never touch the server, and the server operates with zero databases and zero logs."
+              }
+            },
+            {
+              "@type": "Question",
+              "name": "Do I need to sign up or provide a phone number?",
+              "acceptedAnswer": {
+                "@type": "Answer",
+                "text": "No. NijiSamvad requires no registration, phone number, email, or credentials. Enter a display name, room name, and shared secret to join."
+              }
+            },
+            {
+              "@type": "Question",
+              "name": "Are video calls encrypted?",
+              "acceptedAnswer": {
+                "@type": "Answer",
+                "text": "Yes. Video and audio calls are transmitted peer-to-peer via WebRTC using SRTP and DTLS encryption directly between participants."
+              }
+            }
+          ]
+        }
+      ]
+    }
+    </script>
   </head>
   <body>
+    <!-- Semantic Noscript Crawl Fallback for Search Engine Crawlers -->
+    <noscript>
+      <header style="padding: 2rem; text-align: center; font-family: sans-serif; background: #000; color: #fff;">
+        <h1>NijiSamvad - Zero-Knowledge End-to-End Encrypted Chat & Video Calling</h1>
+        <p>Private, confidential, ephemeral conversations. No signup, no phone numbers, and no permanent logs.</p>
+        <h2>Core Security Features</h2>
+        <ul style="list-style: none; padding: 0; line-height: 1.8;">
+          <li>🛡️ <strong>AES-256-GCM Client-Side Encryption:</strong> Mathematically impossible for intermediate servers to read your chats.</li>
+          <li>📹 <strong>Peer-to-Peer WebRTC Video Calls:</strong> Direct encrypted audio and video streaming between devices with noise cancellation and background bokeh.</li>
+          <li>⏱️ <strong>Self-Destructing Messages:</strong> Automatic countdown timer permanently purges sensitive notes and photos.</li>
+          <li>🎨 <strong>Encrypted Live Whiteboard:</strong> Draw and collaborate in real-time with full cryptographic security.</li>
+          <li>🔗 <strong>Instant QR Code & Fragment Invites:</strong> Room secrets reside solely in the URL hash, never transmitted over HTTP.</li>
+        </ul>
+        <p>Please enable JavaScript to launch the NijiSamvad encrypted workspace.</p>
+      </header>
+    </noscript>
+
     <div id="root"></div>
     <script type="module" src="/src/main.jsx"></script>
   </body>

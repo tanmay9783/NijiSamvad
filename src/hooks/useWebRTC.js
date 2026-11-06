@@ -790,62 +790,40 @@ export default function useWebRTC(socket, roomUsers) {
           const w = canvas.width;
           const h = canvas.height;
 
-          // 1. Full-frame blurred background pass (Entire background room is smoothly blurred)
+          // 1. Draw blurred background across the whole frame
           ctx.save();
           ctx.filter = 'blur(16px)';
           ctx.drawImage(hiddenVideo, 0, 0, w, h);
           ctx.restore();
+          ctx.filter = 'none';
 
-          // 2. Feathered natural portrait silhouette (Head, shoulders, and torso remain sharp, NO circular cutout)
-          if (!maskCanvasRef.current) {
-            maskCanvasRef.current = document.createElement('canvas');
-          }
-          const mask = maskCanvasRef.current;
-          if (mask.width !== w || mask.height !== h) {
-            mask.width = w;
-            mask.height = h;
-          }
-          const mCtx = mask.getContext('2d');
-          mCtx.clearRect(0, 0, w, h);
+          // 2. Draw outer soft transition layer (slightly larger silhouette at 55% opacity for natural edge feathering)
+          ctx.save();
+          ctx.beginPath();
+          ctx.ellipse(w * 0.50, h * 0.38, w * 0.25, h * 0.31, 0, 0, Math.PI * 2);
+          ctx.moveTo(w * 0.18, h * 0.44);
+          ctx.bezierCurveTo(w * 0.14, h * 0.58, 0, h * 0.82, 0, h);
+          ctx.lineTo(w, h);
+          ctx.bezierCurveTo(w, h * 0.82, w * 0.86, h * 0.58, w * 0.82, h * 0.44);
+          ctx.closePath();
+          ctx.clip();
+          ctx.globalAlpha = 0.55;
+          ctx.drawImage(hiddenVideo, 0, 0, w, h);
+          ctx.restore();
 
-          // Draw sharp camera frame onto mask canvas
-          mCtx.drawImage(hiddenVideo, 0, 0, w, h);
-
-          // Prepare smooth portrait silhouette mask
-          if (!portraitCanvasRef.current) {
-            portraitCanvasRef.current = document.createElement('canvas');
-          }
-          const pCanvas = portraitCanvasRef.current;
-          if (pCanvas.width !== w || pCanvas.height !== h) {
-            pCanvas.width = w;
-            pCanvas.height = h;
-          }
-          const pCtx = pCanvas.getContext('2d');
-          pCtx.clearRect(0, 0, w, h);
-
-          // Head & face oval
-          pCtx.fillStyle = '#ffffff';
-          pCtx.beginPath();
-          pCtx.ellipse(w * 0.50, h * 0.36, w * 0.23, h * 0.28, 0, 0, Math.PI * 2);
-          pCtx.fill();
-
-          // Torso & shoulders widening down to bottom of frame
-          pCtx.beginPath();
-          pCtx.moveTo(w * 0.22, h * 0.44);
-          pCtx.bezierCurveTo(w * 0.16, h * 0.60, w * 0.05, h * 0.85, 0, h);
-          pCtx.lineTo(w, h);
-          pCtx.bezierCurveTo(w * 0.95, h * 0.85, w * 0.84, h * 0.60, w * 0.78, h * 0.44);
-          pCtx.closePath();
-          pCtx.fill();
-
-          // Feather the silhouette edges softly into the blurred background
-          mCtx.globalCompositeOperation = 'destination-in';
-          mCtx.filter = 'blur(18px)';
-          mCtx.drawImage(pCanvas, 0, 0);
-          mCtx.filter = 'none';
-
-          // Composite the feathered sharp portrait over the full-frame blurred background
-          ctx.drawImage(mask, 0, 0);
+          // 3. Draw inner SHARP person silhouette (100% crystal-clear focus on face, head, and body)
+          ctx.save();
+          ctx.beginPath();
+          ctx.ellipse(w * 0.50, h * 0.38, w * 0.22, h * 0.28, 0, 0, Math.PI * 2);
+          ctx.moveTo(w * 0.22, h * 0.46);
+          ctx.bezierCurveTo(w * 0.17, h * 0.60, w * 0.05, h * 0.85, 0, h);
+          ctx.lineTo(w, h);
+          ctx.bezierCurveTo(w * 0.95, h * 0.85, w * 0.83, h * 0.60, w * 0.78, h * 0.46);
+          ctx.closePath();
+          ctx.clip();
+          ctx.globalAlpha = 1.0;
+          ctx.drawImage(hiddenVideo, 0, 0, w, h);
+          ctx.restore();
 
           blurAnimationRef.current = requestAnimationFrame(renderBlur);
         };
