@@ -1,17 +1,36 @@
-import React, { useState } from 'react';
-import { Shield, Server, Shuffle, Copy, Check } from 'lucide-react';
+import React, { useState, useEffect } from 'react';
+import { Shield, Server, Shuffle, Copy, Check, QrCode, Link2 } from 'lucide-react';
 import { generateSecureRoomSecret } from '../services/crypto';
+import QRScannerModal from './QRScannerModal';
 
 export default function JoinModal({ onJoin, isConnecting, connectionError, connectingStatus }) {
   const [userName, setUserName] = useState('');
   const [roomName, setRoomName] = useState('');
   const [roomSecret, setRoomSecret] = useState('');
   const [copied, setCopied] = useState(false);
+  const [hasInviteLink, setHasInviteLink] = useState(false);
+  const [showScanner, setShowScanner] = useState(false);
   const [serverTarget, setServerTarget] = useState(() => (
     typeof window !== 'undefined' && (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1')
       ? 'local'
       : 'remote'
   )); // local, remote, demo
+
+  useEffect(() => {
+    if (typeof window !== 'undefined' && window.location.hash) {
+      try {
+        const hash = window.location.hash.substring(1);
+        const params = new URLSearchParams(hash);
+        const urlRoom = params.get('room');
+        const urlSecret = params.get('secret');
+        if (urlRoom && urlSecret) {
+          setRoomName(urlRoom);
+          setRoomSecret(urlSecret);
+          setHasInviteLink(true);
+        }
+      } catch (e) {}
+    }
+  }, []);
 
   const generateRoom = () => {
     const adjectives = ['swift', 'silent', 'secure', 'neon', 'cyber', 'crystal'];
@@ -53,6 +72,13 @@ export default function JoinModal({ onJoin, isConnecting, connectionError, conne
           </p>
         </div>
         
+        {hasInviteLink && (
+          <div className="alert alert-info" style={{ marginBottom: '1.25rem', background: 'rgba(255, 214, 0, 0.12)', border: '1px solid var(--border-strong)', color: 'var(--primary)', display: 'flex', alignItems: 'center', gap: '0.6rem', fontSize: '0.85rem', padding: '0.75rem 1rem', borderRadius: 'var(--radius-sm)' }}>
+            <Link2 size={18} />
+            <span>Invite link detected for <strong>#{roomName}</strong>. Enter your name to join securely.</span>
+          </div>
+        )}
+
         {connectionError && (
           <div className="alert alert-error" style={{ marginBottom: '1.5rem' }}>
             {connectionError}
@@ -84,7 +110,10 @@ export default function JoinModal({ onJoin, isConnecting, connectionError, conne
           <div className="input-group">
             <label>
               Room ID 
-              <button type="button" onClick={generateRoom} className="btn-text btn-small"><Shuffle size={14}/> Generate</button>
+              <span className="btn-group-inline">
+                <button type="button" onClick={() => setShowScanner(true)} className="btn-text btn-small"><QrCode size={14}/> Scan QR</button>
+                <button type="button" onClick={generateRoom} className="btn-text btn-small"><Shuffle size={14}/> Generate</button>
+              </span>
             </label>
             <input type="text" value={roomName} onChange={(e) => setRoomName(e.target.value)} required placeholder="Enter or generate room ID" style={{ padding: '0.85rem 1rem' }} />
           </div>
@@ -127,6 +156,17 @@ export default function JoinModal({ onJoin, isConnecting, connectionError, conne
           Crafted with ❤️ by <strong style={{ color: 'var(--primary)' }}>Tanmay</strong>
         </div>
       </div>
+
+      <QRScannerModal 
+        isOpen={showScanner} 
+        onClose={() => setShowScanner(false)} 
+        onScanSuccess={({ room, secret }) => {
+          setRoomName(room);
+          setRoomSecret(secret);
+          setShowScanner(false);
+          setHasInviteLink(true);
+        }} 
+      />
     </div>
   );
 }

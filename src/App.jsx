@@ -9,6 +9,8 @@ import MessageList from './components/MessageList';
 import MessageInput from './components/MessageInput';
 import UserDrawer from './components/UserDrawer';
 import SecurityModal from './components/SecurityModal';
+import InviteModal from './components/InviteModal';
+import Whiteboard from './components/Whiteboard';
 import CallInterface from './components/CallInterface';
 import Toast from './components/Toast';
 import IncomingCallModal from './components/IncomingCallModal';
@@ -24,6 +26,7 @@ export default function App() {
   const [authHash, setAuthHash] = useState('');
   const [roomFingerprint, setRoomFingerprint] = useState('');
   const [roomName, setRoomName] = useState('');
+  const [rawRoomSecret, setRawRoomSecret] = useState('');
   const [userName, setUserName] = useState('');
   const [users, setUsers] = useState([]);
   const [toasts, setToasts] = useState([]);
@@ -44,9 +47,12 @@ export default function App() {
     }
   }, []);
   
-  // Modals & Drawers
+  // Modals, Drawers & Collaboration
   const [showDrawer, setShowDrawer] = useState(false);
   const [showSecurity, setShowSecurity] = useState(false);
+  const [showInvite, setShowInvite] = useState(false);
+  const [showWhiteboard, setShowWhiteboard] = useState(false);
+  const [remoteWhiteboardAction, setRemoteWhiteboardAction] = useState(null);
   const [showChatInCall, setShowChatInCall] = useState(true);
   
   // Demo Mode state
@@ -75,7 +81,7 @@ export default function App() {
     };
   }, []);
 
-  // WebRTC Call State Hook (Phase 11)
+  // WebRTC Call State Hook (Phase 11 & Multimedia Enhancements)
   const {
     callState,
     incomingCall,
@@ -84,6 +90,8 @@ export default function App() {
     remoteStreams,
     mediaState,
     isScreenSharing,
+    noiseSuppression,
+    isBackgroundBlurred,
     startCall,
     acceptCall,
     declineCall,
@@ -92,8 +100,36 @@ export default function App() {
     startScreenShare,
     stopScreenShare,
     toggleAudio,
-    toggleVideo
+    toggleVideo,
+    toggleNoiseSuppression,
+    toggleBackgroundBlur
   } = useWebRTC(socket, users);
+
+  const handleMessageExpired = useCallback((expiredId) => {
+    setMessages(prev => {
+      const msg = prev.find(m => m.id === expiredId);
+      if (msg && msg.isImage && msg.text && msg.text.startsWith('blob:')) {
+        try { URL.revokeObjectURL(msg.text); } catch(e){}
+        blobUrlsRef.current.delete(msg.text);
+      }
+      return prev.filter(m => m.id !== expiredId);
+    });
+  }, []);
+
+  const handleBroadcastWhiteboard = useCallback(async (actionObj) => {
+    if (!encryptionKey || !socket) return;
+    const payloadContent = JSON.stringify({
+      version: 1,
+      type: 'whiteboard',
+      ...actionObj
+    });
+    try {
+      const encryptedContent = await encryptMessage(payloadContent, encryptionKey);
+      socket.emit('send', { id: `wb_${Date.now()}`, content: encryptedContent });
+    } catch (err) {
+      console.warn('Failed to encrypt whiteboard action:', err);
+    }
+  }, [encryptionKey, socket]);
 
   const addToast = (message, type = 'info') => {
     const id = Date.now();
@@ -142,6 +178,7 @@ export default function App() {
     setIsConnecting(true);
     setConnectionError('');
     setRoomName(room);
+    setRawRoomSecret(secret);
     setUserName(name);
 
     if (!secret || secret.trim() === '') {
@@ -298,8 +335,16 @@ export default function App() {
         
         // Parse protocol JSON envelope
         let finalMessage = decryptedStr;
+        let msgTtl = undefined;
         try {
           const msgObj = JSON.parse(decryptedStr);
+          if (msgObj && msgObj.type === 'whiteboard') {
+            setRemoteWhiteboardAction(msgObj);
+            return;
+          }
+          if (msgObj && msgObj.ttl) {
+            msgTtl = msgObj.ttl;
+          }
           if (msgObj && msgObj.version === 1) {
             if (msgObj.type === 'text') {
               finalMessage = msgObj.text;
@@ -338,7 +383,8 @@ export default function App() {
           timestamp: payload.timestamp,
           isImage,
           replyTo: msgReplyTo,
-          mentions: msgMentions
+          mentions: msgMentions,
+          ttl: msgTtl
         });
       });
 
@@ -355,7 +401,7 @@ export default function App() {
     }
   };
 
-  const handleSendMessage = async (msgTextOrFile, isImage = false, replyTo = null, mentions = []) => {
+  const handleSendMessage = async (msgTextOrFile, isImage = false, replyTo = null, mentions = [], ttl = 0) => {
     let payloadContent;
     let localPreview = null;
     
@@ -400,7 +446,8 @@ export default function App() {
           mimeType: file.type,
           size: file.size,
           attachmentKey: attachmentKeyStr,
-          iv: ivStr
+          iv: ivStr,
+          ttl: ttl > 0 ? ttl : undefined
         });
       } catch (err) {
         addToast('Failed to send attachment', 'error');
@@ -413,7 +460,8 @@ export default function App() {
         type: 'text',
         text: msgTextOrFile,
         replyTo,
-        mentions
+        mentions,
+        ttl: ttl > 0 ? ttl : undefined
       });
       localPreview = msgTextOrFile;
     }
@@ -438,7 +486,8 @@ export default function App() {
       timestamp: new Date().toISOString(),
       isImage,
       replyTo,
-      mentions
+      mentions,
+      ttl: ttl > 0 ? ttl : undefined
     });
 
     setReplyingTo(null);
@@ -494,7 +543,11 @@ export default function App() {
     setAuthHash('');
     setRoomFingerprint('');
     setRoomName('');
+    setRawRoomSecret('');
     setUserName('');
+    setShowInvite(false);
+    setShowWhiteboard(false);
+    setRemoteWhiteboardAction(null);
     addToast('Left the chat room', 'info');
   };
 
@@ -544,6 +597,9 @@ export default function App() {
             memberCount={users.length}
             onOpenDrawer={() => setShowDrawer(true)}
             onOpenSecurity={() => setShowSecurity(true)}
+            onOpenInvite={() => setShowInvite(true)}
+            onToggleWhiteboard={() => setShowWhiteboard(prev => !prev)}
+            isWhiteboardOpen={showWhiteboard}
             isSecure={!!encryptionKey}
             callState={callState}
             activeCallRoom={activeCallRoom}
@@ -580,6 +636,12 @@ export default function App() {
               remoteStreams={remoteStreams}
               mediaState={mediaState}
               isScreenSharing={isScreenSharing}
+              isBackgroundBlurred={isBackgroundBlurred}
+              onToggleBackgroundBlur={toggleBackgroundBlur}
+              noiseSuppression={noiseSuppression}
+              onToggleNoiseSuppression={toggleNoiseSuppression}
+              onToggleWhiteboard={() => setShowWhiteboard(prev => !prev)}
+              isWhiteboardOpen={showWhiteboard}
               onToggleAudio={toggleAudio}
               onToggleVideo={toggleVideo}
               onToggleScreenShare={handleToggleScreenShare}
@@ -596,6 +658,7 @@ export default function App() {
                 messages={messages} 
                 _currentUser={userName} 
                 onReply={(msg) => setReplyingTo(msg)} 
+                onExpireMessage={handleMessageExpired}
               />
               <MessageInput 
                 onSendMessage={handleSendMessage} 
@@ -606,6 +669,20 @@ export default function App() {
               />
             </main>
           )}
+
+          <InviteModal 
+            isOpen={showInvite} 
+            onClose={() => setShowInvite(false)} 
+            roomName={roomName} 
+            roomSecret={rawRoomSecret} 
+          />
+
+          <Whiteboard 
+            isOpen={showWhiteboard} 
+            onClose={() => setShowWhiteboard(false)} 
+            onBroadcastAction={handleBroadcastWhiteboard} 
+            remoteAction={remoteWhiteboardAction} 
+          />
 
           <footer className="app-footer">
             <span>Crafted with ❤️ by <strong>Tanmay</strong></span>

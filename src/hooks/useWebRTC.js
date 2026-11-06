@@ -19,12 +19,17 @@ export default function useWebRTC(socket, roomUsers) {
   const [remoteStreams, setRemoteStreams] = useState({});
   const [mediaState, setMediaState] = useState({ audio: true, video: true });
   const [isScreenSharing, setIsScreenSharing] = useState(false);
+  const [noiseSuppression, setNoiseSuppression] = useState(true);
+  const [isBackgroundBlurred, setIsBackgroundBlurred] = useState(false);
   const [acceptedPeers, setAcceptedPeers] = useState({}); // socketId -> name
 
   const peersRef = useRef({});
   const localStreamRef = useRef(null);
   const displayTrackRef = useRef(null);
   const cameraVideoTrackRef = useRef(null);
+  const blurCanvasRef = useRef(null);
+  const blurAnimationRef = useRef(null);
+  const blurredVideoTrackRef = useRef(null);
   const roomUsersRef = useRef(roomUsers);
   const candidateQueueRef = useRef({});
 
@@ -59,7 +64,11 @@ export default function useWebRTC(socket, roomUsers) {
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ 
         video: true, 
-        audio: true 
+        audio: {
+          echoCancellation: true,
+          noiseSuppression: noiseSuppression,
+          autoGainControl: true
+        }
       });
       setLocalStream(stream);
       localStreamRef.current = stream;
@@ -76,7 +85,11 @@ export default function useWebRTC(socket, roomUsers) {
       try {
         const audioStream = await navigator.mediaDevices.getUserMedia({
           video: false,
-          audio: true
+          audio: {
+            echoCancellation: true,
+            noiseSuppression: noiseSuppression,
+            autoGainControl: true
+          }
         });
         setLocalStream(audioStream);
         localStreamRef.current = audioStream;
@@ -90,9 +103,19 @@ export default function useWebRTC(socket, roomUsers) {
         return null;
       }
     }
-  }, [mediaState.audio, mediaState.video]);
+  }, [mediaState.audio, mediaState.video, noiseSuppression]);
 
   const stopLocalStream = useCallback(() => {
+    if (blurAnimationRef.current) {
+      cancelAnimationFrame(blurAnimationRef.current);
+      blurAnimationRef.current = null;
+    }
+    if (blurredVideoTrackRef.current) {
+      blurredVideoTrackRef.current.stop();
+      blurredVideoTrackRef.current = null;
+    }
+    setIsBackgroundBlurred(false);
+
     if (displayTrackRef.current) {
       displayTrackRef.current.stop();
       displayTrackRef.current = null;
@@ -512,6 +535,117 @@ export default function useWebRTC(socket, roomUsers) {
     }
   };
 
+  const toggleNoiseSuppression = useCallback(async () => {
+    if (localStreamRef.current) {
+      const audioTrack = localStreamRef.current.getAudioTracks()[0];
+      if (audioTrack && audioTrack.applyConstraints) {
+        const nextVal = !noiseSuppression;
+        try {
+          await audioTrack.applyConstraints({
+            echoCancellation: true,
+            noiseSuppression: nextVal,
+            autoGainControl: true
+          });
+          setNoiseSuppression(nextVal);
+        } catch (e) {
+          console.warn("Could not apply audio constraints:", e);
+        }
+      }
+    }
+  }, [noiseSuppression]);
+
+  const toggleBackgroundBlur = useCallback(async () => {
+    if (!localStreamRef.current) return;
+    const currentVideoTrack = cameraVideoTrackRef.current;
+    if (!currentVideoTrack) return;
+
+    if (isBackgroundBlurred) {
+      // Turn OFF blur: restore original camera video track
+      setIsBackgroundBlurred(false);
+      if (blurAnimationRef.current) {
+        cancelAnimationFrame(blurAnimationRef.current);
+        blurAnimationRef.current = null;
+      }
+      if (blurredVideoTrackRef.current) {
+        blurredVideoTrackRef.current.stop();
+        blurredVideoTrackRef.current = null;
+      }
+      for (const peerId of Object.keys(peersRef.current)) {
+        const peer = peersRef.current[peerId];
+        if (peer) {
+          const videoSender = peer.getSenders().find(s => s.track && s.track.kind === 'video');
+          if (videoSender) {
+            try { await videoSender.replaceTrack(currentVideoTrack); } catch(e){}
+          }
+        }
+      }
+    } else {
+      // Turn ON blur: try native platform capability or canvas portrait blur
+      try {
+        if (currentVideoTrack.getCapabilities && currentVideoTrack.getCapabilities().backgroundBlur) {
+          await currentVideoTrack.applyConstraints({ backgroundBlur: true });
+          setIsBackgroundBlurred(true);
+          return;
+        }
+      } catch (err) {}
+
+      try {
+        const hiddenVideo = document.createElement('video');
+        hiddenVideo.autoplay = true;
+        hiddenVideo.playsInline = true;
+        hiddenVideo.muted = true;
+        hiddenVideo.srcObject = new MediaStream([currentVideoTrack]);
+        await hiddenVideo.play();
+
+        const canvas = document.createElement('canvas');
+        canvas.width = 640;
+        canvas.height = 480;
+        const ctx = canvas.getContext('2d');
+        blurCanvasRef.current = canvas;
+
+        const renderBlur = () => {
+          if (!hiddenVideo.videoWidth) {
+            blurAnimationRef.current = requestAnimationFrame(renderBlur);
+            return;
+          }
+          // Blurred background pass
+          ctx.save();
+          ctx.filter = 'blur(16px)';
+          ctx.drawImage(hiddenVideo, 0, 0, canvas.width, canvas.height);
+          ctx.restore();
+
+          // Centered subject focus pass
+          ctx.save();
+          ctx.beginPath();
+          ctx.ellipse(canvas.width / 2, canvas.height / 2, canvas.width * 0.35, canvas.height * 0.45, 0, 0, Math.PI * 2);
+          ctx.clip();
+          ctx.drawImage(hiddenVideo, 0, 0, canvas.width, canvas.height);
+          ctx.restore();
+
+          blurAnimationRef.current = requestAnimationFrame(renderBlur);
+        };
+        blurAnimationRef.current = requestAnimationFrame(renderBlur);
+
+        const canvasStream = canvas.captureStream(30);
+        const blurredTrack = canvasStream.getVideoTracks()[0];
+        blurredVideoTrackRef.current = blurredTrack;
+        setIsBackgroundBlurred(true);
+
+        for (const peerId of Object.keys(peersRef.current)) {
+          const peer = peersRef.current[peerId];
+          if (peer) {
+            const videoSender = peer.getSenders().find(s => s.track && s.track.kind === 'video');
+            if (videoSender) {
+              try { await videoSender.replaceTrack(blurredTrack); } catch(e){}
+            }
+          }
+        }
+      } catch (e) {
+        console.warn("Could not create canvas blur stream:", e);
+      }
+    }
+  }, [isBackgroundBlurred]);
+
   return {
     callState,
     incomingCall,
@@ -521,6 +655,8 @@ export default function useWebRTC(socket, roomUsers) {
     mediaState,
     isScreenSharing,
     acceptedPeers,
+    noiseSuppression,
+    isBackgroundBlurred,
     startCall,
     acceptCall,
     declineCall,
@@ -529,7 +665,9 @@ export default function useWebRTC(socket, roomUsers) {
     startScreenShare,
     stopScreenShare,
     toggleAudio,
-    toggleVideo
+    toggleVideo,
+    toggleNoiseSuppression,
+    toggleBackgroundBlur
   };
 }
 

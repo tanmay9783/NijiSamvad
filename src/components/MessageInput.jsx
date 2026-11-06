@@ -1,10 +1,21 @@
 import React, { useState, useRef, useEffect } from 'react';
 import EmojiPicker from 'emoji-picker-react';
-import { Smile, Send, Paperclip, X } from 'lucide-react';
+import { Smile, Send, Paperclip, X, Flame } from 'lucide-react';
+
+const TTL_OPTIONS = [
+  { label: 'Off', seconds: 0 },
+  { label: '10s', seconds: 10 },
+  { label: '30s', seconds: 30 },
+  { label: '1m', seconds: 60 },
+  { label: '5m', seconds: 300 },
+  { label: '1h', seconds: 3600 }
+];
 
 export default function MessageInput({ onSendMessage, disabled, onTyping, replyingTo, onCancelReply, users = [] }) {
   const [msg, setMsg] = useState('');
   const [showEmoji, setShowEmoji] = useState(false);
+  const [burnTtl, setBurnTtl] = useState(0); // 0 = off, else seconds
+  const [showTtlMenu, setShowTtlMenu] = useState(false);
   const [mentionQuery, setMentionQuery] = useState(null);
   const [mentionIndex, setMentionIndex] = useState(0);
   const [selectedMentions, setSelectedMentions] = useState([]);
@@ -125,12 +136,13 @@ export default function MessageInput({ onSendMessage, disabled, onTyping, replyi
         preview: replyingTo.text
       } : null;
 
-      onSendMessage(finalMsg, false, replyData, finalMentions);
+      onSendMessage(finalMsg, false, replyData, finalMentions, burnTtl);
       setMsg('');
       setSelectedMentions([]);
       setMentionQuery(null);
       if (inputRef.current) inputRef.current.style.height = 'auto';
       setShowEmoji(false);
+      setShowTtlMenu(false);
       if (onTyping) onTyping(false);
     }
   };
@@ -154,7 +166,7 @@ export default function MessageInput({ onSendMessage, disabled, onTyping, replyi
       preview: replyingTo.text
     } : null;
     
-    onSendMessage(file, true, replyData, []);
+    onSendMessage(file, true, replyData, [], burnTtl);
     e.target.value = null; 
   };
 
@@ -198,6 +210,38 @@ export default function MessageInput({ onSendMessage, disabled, onTyping, replyi
           <EmojiPicker onEmojiClick={onEmojiClick} theme="auto" />
         </div>
       )}
+      {burnTtl > 0 && (
+        <div className="active-ttl-indicator">
+          <Flame size={14} className="burn-flame-icon" />
+          <span>Burn-after-reading: <strong>{TTL_OPTIONS.find(o => o.seconds === burnTtl)?.label}</strong></span>
+          <button type="button" onClick={() => setBurnTtl(0)} className="ttl-close-btn" title="Disable auto-destruct">
+            <X size={12} />
+          </button>
+        </div>
+      )}
+
+      {showTtlMenu && (
+        <div className="ttl-popover">
+          <div className="ttl-popover-title">
+            <Flame size={14} style={{ color: 'var(--danger)' }} />
+            <span>Self-Destruct Timer</span>
+          </div>
+          <div className="ttl-options-list">
+            {TTL_OPTIONS.map(opt => (
+              <button
+                key={opt.seconds}
+                type="button"
+                className={`ttl-opt-btn ${burnTtl === opt.seconds ? 'active' : ''}`}
+                onClick={() => { setBurnTtl(opt.seconds); setShowTtlMenu(false); }}
+              >
+                <span>{opt.label}</span>
+                {burnTtl === opt.seconds && <span className="ttl-check">✓</span>}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+
       <form onSubmit={handleSubmit} id="send-container">
         <button type="button" className="emoji-btn" onClick={() => setShowEmoji(!showEmoji)} disabled={disabled} title="Add emoji">
           <Smile size={24} />
@@ -207,6 +251,16 @@ export default function MessageInput({ onSendMessage, disabled, onTyping, replyi
            <input type="file" style={{display: 'none'}} onChange={handleImageUpload} disabled={disabled} />
            <Paperclip size={20} />
         </label>
+
+        <button 
+          type="button" 
+          className={`emoji-btn ${burnTtl > 0 ? 'ttl-active' : ''}`} 
+          onClick={() => setShowTtlMenu(!showTtlMenu)} 
+          disabled={disabled} 
+          title="Self-destruct timer"
+        >
+          <Flame size={20} style={{ color: burnTtl > 0 ? 'var(--danger)' : 'inherit' }} />
+        </button>
         
         <textarea 
           ref={inputRef} 

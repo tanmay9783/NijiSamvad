@@ -1,5 +1,8 @@
 import React, { useState } from 'react';
-import { Moon, Sun, Shield, ShieldAlert, LogOut, Volume2, VolumeX, Users, PhoneCall, PhoneOff, MoreVertical } from 'lucide-react';
+import { 
+  Moon, Sun, Shield, ShieldAlert, LogOut, Volume2, VolumeX, Users, 
+  PhoneCall, PhoneOff, MoreVertical, UserPlus, Edit3 
+} from 'lucide-react';
 
 export default function Header({ 
   theme, onToggleTheme, 
@@ -10,6 +13,9 @@ export default function Header({
   memberCount,
   onOpenDrawer,
   onOpenSecurity,
+  onOpenInvite,
+  onToggleWhiteboard,
+  isWhiteboardOpen,
   isSecure,
   callState,
   activeCallRoom,
@@ -33,6 +39,9 @@ export default function Header({
             <button className="badge-btn member-count" onClick={onOpenDrawer} title="View Members">
               <Users size={14} /> <span className="hide-on-mobile">{memberCount}</span>
             </button>
+            <button className="badge-btn invite-btn" onClick={onOpenInvite} title="Share Room Invite & QR Code">
+              <UserPlus size={14} /> <span className="hide-on-mobile">Invite</span>
+            </button>
             <button className={`badge-btn security-badge ${isSecure ? 'secure' : 'insecure'}`} onClick={onOpenSecurity} title="Security Info">
               {isSecure ? <Shield size={14} /> : <ShieldAlert size={14} />}
               <span className="hide-on-mobile">{isSecure ? 'End-to-end encrypted' : 'Unencrypted'}</span>
@@ -51,6 +60,14 @@ export default function Header({
           )}
 
           <div className={`header-actions ${mobileMenuOpen ? 'mobile-open' : ''}`}>
+            <button 
+              className={`icon-btn ${isWhiteboardOpen ? 'call-active' : ''}`} 
+              onClick={onToggleWhiteboard} 
+              title={isWhiteboardOpen ? "Close Whiteboard" : "Live Whiteboard"}
+            >
+              <Edit3 size={20} />
+            </button>
+
             <button 
               className={`icon-btn ${isInCall ? 'call-active' : ''}`} 
               onClick={isInCall ? onEndCall : onStartCall} 

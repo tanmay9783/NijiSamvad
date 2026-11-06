@@ -1505,3 +1505,297 @@ body {
   opacity: 0.4;
   font-size: 0.7rem;
 }
+
+/* ==========================================================================
+   Feature Enhancements: Burn-After-Reading, Invite & QR, Live Whiteboard
+   ========================================================================== */
+
+/* Header Invite button */
+.badge-btn.invite-btn {
+  background: rgba(245, 158, 11, 0.12);
+  border: 1px solid rgba(245, 158, 11, 0.3);
+  color: var(--primary);
+}
+.badge-btn.invite-btn:hover {
+  background: rgba(245, 158, 11, 0.22);
+}
+
+/* Burn-After-Reading Timer & Dissolve Animation */
+.burn-timer-wrapper {
+  margin-top: 0.35rem;
+  padding-top: 0.25rem;
+  border-top: 1px dashed rgba(255, 255, 255, 0.15);
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+}
+.burn-timer-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  font-size: 0.7rem;
+  font-weight: 600;
+  color: #f59e0b;
+}
+.burn-flame-icon {
+  color: #ef4444;
+  animation: flameFlicker 1.5s infinite ease-in-out;
+}
+@keyframes flameFlicker {
+  0%, 100% { transform: scale(1); opacity: 0.9; }
+  50% { transform: scale(1.15) rotate(4deg); opacity: 1; }
+}
+.burn-progress-bar {
+  width: 100%;
+  height: 3px;
+  background: rgba(255, 255, 255, 0.12);
+  border-radius: 999px;
+  overflow: hidden;
+}
+.burn-progress-fill {
+  height: 100%;
+  background: linear-gradient(90deg, #ef4444, #f59e0b);
+  border-radius: 999px;
+  transition: width 0.25s linear;
+}
+.dissolving-bubble {
+  animation: burnSmokeFade 0.6s cubic-bezier(0.4, 0, 0.2, 1) forwards !important;
+  pointer-events: none;
+}
+@keyframes burnSmokeFade {
+  0% {
+    opacity: 1;
+    transform: scale(1) translateY(0);
+    filter: blur(0);
+  }
+  50% {
+    opacity: 0.5;
+    transform: scale(0.92) translateY(-6px);
+    filter: blur(3px) grayscale(80%);
+  }
+  100% {
+    opacity: 0;
+    transform: scale(0.7) translateY(-16px);
+    filter: blur(8px) grayscale(100%);
+  }
+}
+
+/* Message Composer TTL Selector */
+.active-ttl-indicator {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: #ef4444;
+  background: rgba(239, 68, 68, 0.12);
+  border: 1px solid rgba(239, 68, 68, 0.3);
+  padding: 0.15rem 0.5rem;
+  border-radius: 999px;
+  margin-left: 0.25rem;
+}
+.active-ttl-indicator.active {
+  background: rgba(239, 68, 68, 0.2);
+  border-color: #ef4444;
+}
+.ttl-popover {
+  position: absolute;
+  bottom: calc(100% + 8px);
+  left: 3rem;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.5);
+  border-radius: 12px;
+  padding: 0.5rem;
+  z-index: 50;
+  min-width: 170px;
+  backdrop-filter: blur(12px);
+}
+.ttl-popover-title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--text-muted);
+  padding: 0.25rem 0.4rem 0.4rem;
+  border-bottom: 1px solid var(--border);
+  margin-bottom: 0.35rem;
+}
+.ttl-close-btn {
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  padding: 0;
+  display: flex;
+}
+.ttl-options-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+}
+.ttl-opt-btn {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  padding: 0.4rem 0.6rem;
+  border-radius: 6px;
+  border: none;
+  background: transparent;
+  color: var(--text);
+  font-size: 0.8rem;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+.ttl-opt-btn:hover {
+  background: rgba(255, 255, 255, 0.08);
+}
+.ttl-opt-btn.active {
+  background: rgba(245, 158, 11, 0.15);
+  color: var(--primary);
+  font-weight: 600;
+}
+.ttl-check {
+  font-size: 0.75rem;
+}
+
+/* Live Collaborative Whiteboard */
+.whiteboard-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.75);
+  backdrop-filter: blur(8px);
+  z-index: 100;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1.25rem;
+}
+.whiteboard-modal {
+  width: 95vw;
+  max-width: 1100px;
+  height: 88vh;
+  max-height: 850px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.7);
+}
+.whiteboard-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.75rem 1.25rem;
+  border-bottom: 1px solid var(--border);
+  background: rgba(0, 0, 0, 0.2);
+}
+.whiteboard-title {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 1rem;
+  font-weight: 600;
+  color: var(--text);
+}
+.whiteboard-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+.whiteboard-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0.6rem 1.25rem;
+  border-bottom: 1px solid var(--border);
+  background: rgba(0, 0, 0, 0.15);
+}
+.tool-group, .color-group, .size-group {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+.toolbar-divider {
+  width: 1px;
+  height: 24px;
+  background: var(--border);
+  margin: 0 0.2rem;
+}
+.tool-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.4rem 0.75rem;
+  border-radius: 8px;
+  font-size: 0.8rem;
+  font-weight: 500;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid var(--border);
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: all 0.15s;
+}
+.tool-btn:hover {
+  background: rgba(255, 255, 255, 0.1);
+  color: var(--text);
+}
+.tool-btn.active {
+  background: var(--primary);
+  color: #000;
+  border-color: var(--primary);
+  font-weight: 600;
+}
+.tool-btn.danger:hover {
+  background: rgba(239, 68, 68, 0.2);
+  color: #ef4444;
+  border-color: rgba(239, 68, 68, 0.4);
+}
+.color-btn {
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  border: 2px solid transparent;
+  cursor: pointer;
+  transition: transform 0.15s;
+}
+.color-btn:hover {
+  transform: scale(1.15);
+}
+.color-btn.active {
+  transform: scale(1.25);
+  border-color: #fff;
+  box-shadow: 0 0 8px rgba(255, 255, 255, 0.5);
+}
+.size-btn {
+  padding: 0.3rem 0.55rem;
+  border-radius: 6px;
+  font-size: 0.72rem;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid var(--border);
+  color: var(--text-muted);
+  cursor: pointer;
+}
+.size-btn.active {
+  background: rgba(255, 255, 255, 0.15);
+  color: var(--text);
+  border-color: rgba(255, 255, 255, 0.3);
+  font-weight: 600;
+}
+.whiteboard-canvas-container {
+  flex: 1;
+  position: relative;
+  background: #111418;
+  overflow: hidden;
+  touch-action: none;
+}
+.whiteboard-canvas-container canvas {
+  width: 100%;
+  height: 100%;
+  display: block;
+}

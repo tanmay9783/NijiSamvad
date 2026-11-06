@@ -2,7 +2,8 @@ import React, { useState, useEffect, useRef, useCallback } from 'react';
 import VideoPlayer from './VideoPlayer';
 import { 
   Mic, MicOff, Video, VideoOff, PhoneOff, Monitor, Maximize, Minimize, 
-  MessageSquare, PhoneCall, Pin, PinOff, Grid, User, LayoutGrid, Square, Tv 
+  MessageSquare, PhoneCall, Pin, PinOff, Grid, User, LayoutGrid, Square, Tv,
+  Sparkles, Volume2, Edit3
 } from 'lucide-react';
 
 // Custom Hook to monitor audio volume for active speaker detection
@@ -152,13 +153,19 @@ export default function CallInterface({
   remoteStreams, 
   mediaState, 
   isScreenSharing,
+  isBackgroundBlurred,
+  onToggleBackgroundBlur,
+  noiseSuppression,
+  onToggleNoiseSuppression,
   onToggleAudio, 
   onToggleVideo, 
   onToggleScreenShare,
   onCancelCall,
   onEndCall,
   showChat,
-  onToggleChat
+  onToggleChat,
+  onToggleWhiteboard,
+  isWhiteboardOpen
 }) {
   const [pinnedPeerId, setPinnedPeerId] = useState(null); // null, 'local', or remote socketId
   const [layoutMode, setLayoutMode] = useState('grid'); // 'grid' or 'speaker'
@@ -449,11 +456,35 @@ export default function CallInterface({
         </button>
 
         <button 
+          className={`control-btn ${isBackgroundBlurred ? 'active-share' : ''}`} 
+          onClick={onToggleBackgroundBlur}
+          title={isBackgroundBlurred ? "Disable Background Blur" : "Blur Background"}
+        >
+          <Sparkles size={20} />
+        </button>
+
+        <button 
+          className={`control-btn ${noiseSuppression ? 'active-chat' : 'danger'}`} 
+          onClick={onToggleNoiseSuppression}
+          title={noiseSuppression ? "Noise Suppression Active" : "Noise Suppression Off"}
+        >
+          <Volume2 size={20} />
+        </button>
+
+        <button 
           className={`control-btn ${isScreenSharing ? 'active-share' : ''}`} 
           onClick={onToggleScreenShare}
           title={isScreenSharing ? "Stop Sharing Screen" : "Share Screen"}
         >
           <Monitor size={20} />
+        </button>
+
+        <button 
+          className={`control-btn ${isWhiteboardOpen ? 'active-share' : ''}`} 
+          onClick={onToggleWhiteboard}
+          title={isWhiteboardOpen ? "Close Whiteboard" : "Open Live Whiteboard"}
+        >
+          <Edit3 size={20} />
         </button>
 
         {/* Picture-in-Picture (PiP) Button */}

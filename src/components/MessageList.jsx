@@ -1,5 +1,5 @@
 import React, { useRef, useEffect, useState } from 'react';
-import { Reply, Copy, MoreHorizontal } from 'lucide-react';
+import { Reply, Copy, MoreHorizontal, Flame } from 'lucide-react';
 
 const getAvatarColor = (name) => {
   let hash = 0;
@@ -36,9 +36,59 @@ const formatDateSeparator = (dateStr) => {
   return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
 };
 
-export default function MessageList({ messages, _currentUser, onReply }) {
+function BurnTimer({ ttl, timestamp, onExpire, msgId }) {
+  const [remaining, setRemaining] = useState(() => {
+    const elapsed = Math.floor((Date.now() - new Date(timestamp).getTime()) / 1000);
+    return Math.max(0, ttl - elapsed);
+  });
+
+  useEffect(() => {
+    if (remaining <= 0) {
+      onExpire(msgId);
+      return;
+    }
+    const interval = setInterval(() => {
+      const elapsed = Math.floor((Date.now() - new Date(timestamp).getTime()) / 1000);
+      const left = Math.max(0, ttl - elapsed);
+      setRemaining(left);
+      if (left <= 0) {
+        clearInterval(interval);
+        onExpire(msgId);
+      }
+    }, 1000);
+    return () => clearInterval(interval);
+  }, [ttl, timestamp, msgId, onExpire, remaining]);
+
+  const pct = Math.max(0, Math.min(100, (remaining / ttl) * 100));
+
+  return (
+    <div className="burn-timer-wrapper" title={`Auto-destruct in ${remaining}s`}>
+      <div className="burn-timer-badge">
+        <Flame size={12} className="burn-flame-icon" />
+        <span>{remaining}s</span>
+      </div>
+      <div className="burn-progress-bar">
+        <div className="burn-progress-fill" style={{ width: `${pct}%` }} />
+      </div>
+    </div>
+  );
+}
+
+export default function MessageList({ messages, _currentUser, onReply, onExpireMessage }) {
   const containerRef = useRef(null);
   const [swipeState, setSwipeState] = useState({ id: null, startX: 0, currentX: 0 });
+
+  const handleExpire = (msgId) => {
+    const el = document.getElementById(msgId);
+    if (el) {
+      el.classList.add('dissolving-bubble');
+      setTimeout(() => {
+        if (onExpireMessage) onExpireMessage(msgId);
+      }, 350);
+    } else {
+      if (onExpireMessage) onExpireMessage(msgId);
+    }
+  };
 
   useEffect(() => {
     if (containerRef.current) {
@@ -212,6 +262,15 @@ export default function MessageList({ messages, _currentUser, onReply }) {
                     renderTextSafely(msg.text, msg.mentions)
                   )}
                 </div>
+
+                {msg.ttl && msg.ttl > 0 && (
+                  <BurnTimer 
+                    ttl={msg.ttl} 
+                    timestamp={msg.timestamp} 
+                    onExpire={handleExpire} 
+                    msgId={msg.id} 
+                  />
+                )}
                 
                 <div className="message-footer">
                   <span className="timestamp">{formatTime(msg.timestamp)}</span>
