@@ -11,7 +11,7 @@ export default function QRScannerModal({ isOpen, onClose, onScanSuccess }) {
   const videoRef = useRef(null);
   const streamRef = useRef(null);
   const scanIntervalRef = useRef(null);
-  const canvasRef = useRef(document.createElement('canvas'));
+  const canvasRef = useRef(null);
 
   // Parse invite URL or hash into { room, secret }
   const parseInviteCode = (text) => {
@@ -78,6 +78,7 @@ export default function QRScannerModal({ isOpen, onClose, onScanSuccess }) {
         await videoRef.current.play().catch(e => console.warn('Video play error:', e));
 
         // Start jsQR scanning loop at 10 fps
+        if (!canvasRef.current) canvasRef.current = document.createElement('canvas');
         const canvas = canvasRef.current;
         const ctx = canvas.getContext('2d', { willReadFrequently: true });
 
@@ -137,6 +138,7 @@ export default function QRScannerModal({ isOpen, onClose, onScanSuccess }) {
 
       const img = new Image();
       img.onload = () => {
+        if (!canvasRef.current) canvasRef.current = document.createElement('canvas');
         const canvas = canvasRef.current;
         const ctx = canvas.getContext('2d', { willReadFrequently: true });
         canvas.width = img.width;

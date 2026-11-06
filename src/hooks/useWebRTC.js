@@ -34,6 +34,28 @@ export default function useWebRTC(socket, roomUsers) {
   const roomUsersRef = useRef(roomUsers);
   const candidateQueueRef = useRef({});
 
+  // Clean up a specific peer connection and its streams
+  const cleanupPeer = useCallback((id) => {
+    if (peersRef.current[id]) {
+      peersRef.current[id].onicecandidate = null;
+      peersRef.current[id].ontrack = null;
+      peersRef.current[id].onconnectionstatechange = null;
+      peersRef.current[id].close();
+      delete peersRef.current[id];
+    }
+    delete candidateQueueRef.current[id];
+    setAcceptedPeers(prev => {
+      const copy = { ...prev };
+      delete copy[id];
+      return copy;
+    });
+    setRemoteStreams(prev => {
+      const newStreams = { ...prev };
+      delete newStreams[id];
+      return newStreams;
+    });
+  }, []);
+
   useEffect(() => {
     roomUsersRef.current = roomUsers;
     // Immediate departure detection: if any peer in call leaves roomUsers, clean them up immediately
@@ -147,27 +169,6 @@ export default function useWebRTC(socket, roomUsers) {
     }
     cameraVideoTrackRef.current = null;
     setIsScreenSharing(false);
-  }, []);
-
-  const cleanupPeer = useCallback((id) => {
-    if (peersRef.current[id]) {
-      peersRef.current[id].onicecandidate = null;
-      peersRef.current[id].ontrack = null;
-      peersRef.current[id].onconnectionstatechange = null;
-      peersRef.current[id].close();
-      delete peersRef.current[id];
-    }
-    delete candidateQueueRef.current[id];
-    setAcceptedPeers(prev => {
-      const copy = { ...prev };
-      delete copy[id];
-      return copy;
-    });
-    setRemoteStreams(prev => {
-      const newStreams = { ...prev };
-      delete newStreams[id];
-      return newStreams;
-    });
   }, []);
 
   const createPeer = useCallback((targetSocketId, stream) => {
