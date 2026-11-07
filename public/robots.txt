@@ -5,3 +5,4 @@ Disallow: /api/
 
 # Sitemap location
 Sitemap: https://niji-samvad.vercel.app/sitemap.xml
+
